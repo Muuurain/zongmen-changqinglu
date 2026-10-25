@@ -9,6 +9,14 @@ const UI = {
     // 尝试读取自动存档，否则开新局
     if (!Game.load(0)) Game.newGame();
 
+    // v1.1.1：DPI 自适应——依据窗口尺寸设定根字号，CSS 全部使用 rem，元素随分辨率等比缩放
+    const fitUI = () => {
+      const scale = Math.min(window.innerWidth / 1360, window.innerHeight / 800);
+      document.documentElement.style.fontSize = (16 * Math.min(Math.max(scale, 0.8), 2.0)) + "px";
+    };
+    fitUI();
+    window.addEventListener("resize", fitUI);
+
     document.querySelectorAll(".nav-btn").forEach(btn => {
       btn.onclick = () => this.switchView(btn.dataset.view);
     });
@@ -304,7 +312,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       const workers = (s.jobs[id] || []).map(did => s.disciples.find(d => d.id === did)).filter(d => d && d.alive);
       const idle = Game.aliveDisciples().filter(d => !Game.hasJob(d));
       return `<div class="panel">
-        <h3><img class="b-icon" src="assets/icon_${id}.png" alt="" onerror="this.style.display='none'">${b.name} <span style="color:var(--text-dim);font-size:13px">Lv.${lv}/${b.maxLv}</span></h3>
+        <h3><img class="b-icon" src="assets/icon_${id}.png" alt="" onerror="this.style.display='none'">${b.name} <span style="color:var(--text-dim);font-size:0.8125rem">Lv.${lv}/${b.maxLv}</span></h3>
         <p style="color:var(--text-dim);margin-bottom:8px">${b.desc}</p>
         <p>效果：<span style="color:var(--jade)">${b.effect(Math.max(1, lv))}</span></p>
         ${b.jobs > 0 && b.jobs < 99 ? `<p>岗位：${workers.length}/${b.jobs}
@@ -482,7 +490,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
           ${Object.entries(TACTICS).map(([id, t]) => `<button class="btn small tactic-btn ${tactic === id ? "primary" : ""}"
             title="${t.desc}" onclick="UI._warTactic('${sectId}','${id}')">${t.name}</button>`).join("")}
         </div>
-        <div class="modal-text" style="font-size:12px;color:var(--text-dim)">${TACTICS[tactic].desc}</div>
+        <div class="modal-text" style="font-size:0.75rem;color:var(--text-dim)">${TACTICS[tactic].desc}</div>
         <div class="modal-footer">
           <button class="btn" onclick="UI.closeModal()">撤兵</button>
           <button class="btn danger" ${atk <= 0 ? "disabled" : ""} onclick="UI._warGo('${sectId}')">发起总攻（不可逆）</button>
@@ -1024,8 +1032,8 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
 
   // ---------- 通用组件 ----------
   modal(html) {
-    const m = document.getElementById("modal");
-    m.innerHTML = html + `<img class="seal-stamp" src="assets/ui/ui_seal_stamp.png" alt="" onerror="this.remove()">`;
+    // v1.1.1：移除弹窗内印章（曾遮挡选项文字），印章固定于主界面 HUD
+    document.getElementById("modal").innerHTML = html;
     document.getElementById("modal-mask").classList.remove("hidden");
   },
   closeModal() {
