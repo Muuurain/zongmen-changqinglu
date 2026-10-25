@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>宗门长青录</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 顶部：宗门信息 + 资源栏 -->
+  <header id="topbar">
+    <div class="sect-info">
+      <span id="sect-name" class="sect-name">青云观</span>
+      <span id="sect-date" class="sect-date">太元元年 一月</span>
+      <span id="sect-rep" class="sect-rep">声望：10</span>
+    </div>
+    <div id="resource-bar" class="resource-bar"></div>
+    <div class="top-actions">
+      <button id="btn-bgm" class="btn small" title="音乐开关">♪</button>
+      <button id="btn-save" class="btn small">存档</button>
+      <button id="btn-load" class="btn small">读档</button>
+      <button id="btn-next-month" class="btn primary">闭关一月 ▸</button>
+    </div>
+  </header>
+
+  <div id="main">
+    <!-- 侧边导航 -->
+    <nav id="sidenav">
+      <button class="nav-btn active" data-view="overview">宗门总览</button>
+      <button class="nav-btn" data-view="disciples">弟子 <span id="nav-disciple-count"></span></button>
+      <button class="nav-btn" data-view="elders">长老院</button>
+      <button class="nav-btn" data-view="buildings">建筑产业</button>
+      <button class="nav-btn" data-view="adventure">外出历练</button>
+      <button class="nav-btn" data-view="trade">商路贸易</button>
+      <button class="nav-btn" data-view="diplomacy">外交势力</button>
+      <button class="nav-btn" data-view="spirit">灵界分宗</button>
+      <button class="nav-btn" data-view="recruit">招募弟子</button>
+      <button class="nav-btn" data-view="log">宗门志</button>
+    </nav>
+
+    <!-- 主内容区 -->
+    <section id="content">
+      <div id="view-overview" class="view"></div>
+      <div id="view-disciples" class="view hidden"></div>
+      <div id="view-elders" class="view hidden"></div>
+      <div id="view-buildings" class="view hidden"></div>
+      <div id="view-adventure" class="view hidden"></div>
+      <div id="view-trade" class="view hidden"></div>
+      <div id="view-diplomacy" class="view hidden"></div>
+      <div id="view-spirit" class="view hidden"></div>
+      <div id="view-recruit" class="view hidden"></div>
+      <div id="view-log" class="view hidden"></div>
+    </section>
+  </div>
+
+  <audio id="bgm" src="assets/bgm_main.mp3" loop></audio>
+
+  <!-- 通用弹窗 -->
+  <div id="modal-mask" class="modal-mask hidden">
+    <div id="modal" class="modal"></div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
