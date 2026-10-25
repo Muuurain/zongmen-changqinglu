@@ -1,11 +1,12 @@
 {
   "name": "zongmen-changqinglu",
   "productName": "宗门长青录",
-  "version": "1.1.1",
-  "description": "传统仙侠宗门经营模拟游戏（v1.1.1 DPI 自适应与弹窗修复版）",
+  "version": "1.1.2",
+  "description": "传统仙侠宗门经营模拟游戏（v1.1.2 核心流程与存档修复版）",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test scripts/game.test.js",
     "pack": "electron-builder --win --x64",
     "dist": "electron-builder --win nsis --x64",
     "build:portable": "node scripts/build-portable.js"

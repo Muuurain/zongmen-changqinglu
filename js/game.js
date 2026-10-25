@@ -16,6 +16,8 @@ const Game = {
     s.sects.forEach(x => { x.allied = false; x.trade = false; x.atWar = false; });
     s.log = [];
     s.caravans = [];
+    s.pendingEvents = [];
+    s.saveVersion = 2;
     s.chaos = 0;            // 宗门混乱度（提升负面事件概率）
     s.veinDamageMonths = 0; // 灵脉受损剩余月数
     s.insightBoostMonths = 0;
@@ -44,6 +46,7 @@ const Game = {
       ? weightedPick([2,2,2,2,2,15,15,15,40])
       : weightedPick(ROOT_WEIGHTS);
     const realm = opts.realm || 0;
+    const age = opts.isLeader ? 45 : ri(15, 25);
     return {
       id: s ? s.nextId++ : 1,
       name, gender,
@@ -54,8 +57,8 @@ const Game = {
       luck: ri(20, 90),
       comprehension: opts.genius ? ri(70, 98) : ri(25, 85),
       loyalty: opts.isLeader ? 100 : ri(50, 85),
-      age: opts.isLeader ? 45 : ri(15, 25),
-      lifespanLeft: (REALMS[realm].lifespan - (opts.isLeader ? 45 : ri(15,25))),
+      age,
+      lifespanLeft: REALMS[realm].lifespan - age,
       foundationDmg: false,
       injuredMonths: 0,
       isLeader: !!opts.isLeader,
@@ -66,7 +69,7 @@ const Game = {
   // ---------- 数值计算 ----------
   disciplePower(d) {
     const base = REALMS[d.realm].powerBase * (1 + d.stage * 0.25);
-    return Math.round(base * CLASSES[d.cls].combat * (1 + d.comprehension / 200));
+    return Math.round(base * CLASSES[d.cls].combat * (1 + d.comprehension / 200) * (1 + this.elderBonus("war")));
   },
   sectPower() {
     return this.state.disciples.filter(d => d.alive)
@@ -80,7 +83,7 @@ const Game = {
   cultivateSpeed(d) {
     const s = this.state;
     const root = SPIRIT_ROOTS[d.root].speed;
-    const yanwu = (s.buildings.yanwu || 0) * 0.15;
+    const yanwu = this.cultivating(d) ? (s.buildings.yanwu || 0) * 0.15 : 0;
     const cangjing = (s.buildings.cangjing || 0) * 0.08;
     const insight = s.insightBoostMonths > 0 ? 0.10 : 0;
     const heritage = this.heritageBonus ? this.heritageBonus() : 0;
@@ -95,12 +98,60 @@ const Game = {
   cultivating(d) {
     return (this.state.jobs.yanwu || []).includes(d.id);
   },
+  monthKey() { return `${this.state.year}-${this.state.month}`; },
+  stationary(d) { return !!d && d.alive && !d.adventure && !this.escorting(d) && !d.tribulation && !this.state.disciples.some(x => x.alive && x.tribulation && x.tribulation.guardians.includes(d.id)); },
+  atHome(d) { return this.stationary(d) && !d.inBranch; },
+  escorting(d) { return this.state.caravans.some(c => c.escortId === d.id); },
+  available(d) { return this.atHome(d) && d.injuredMonths <= 0; },
+  ritualAvailable(d) { return this.stationary(d) && d.injuredMonths <= 0; },
+  canGuard(d, g, minRealm) { return !!g && g.id !== d.id && this.ritualAvailable(g) && !!g.inBranch === !!d.inBranch && g.realm >= minRealm; },
+  cultivationGain(d) {
+    if (!d.alive || d.injuredMonths > 0 || d.adventure || this.escorting(d) || d.tribulation) return 0;
+    return this.cultivateSpeed(d) * 10 * (this.hasJob(d) && !this.cultivating(d) ? 0.5 : 1);
+  },
+  addExp(d, amount) { d.exp = Math.min(stageExpNeed(d.realm, d.stage), Math.max(0, d.exp + amount)); },
+  removeDisciple(d, legacy = true) {
+    if (!d || !d.alive) return;
+    const wasLeader = d.isLeader;
+    d.alive = false; d.isLeader = false; d.adventure = null; d.tribulation = null;
+    this.removeFromJobs(d.id);
+    if (legacy) this.leaveLegacy(d);
+    if (wasLeader) this.handleLeaderDeath();
+    this.state.gameOver = !this.aliveDisciples().length;
+  },
+  warError(sect) {
+    if (this.state.gameOver) return "宗门已覆灭";
+    if (!sect || !this.state.sects.includes(sect)) return "宗门不存在";
+    if (sect.destroyed) return "该宗门已覆灭";
+    if (sect.vassal) return "对方已是我宗附庸";
+    if (sect.broken) return "请先完成该宗门的战后处置";
+    if (sect.lastWarMonth === this.monthKey()) return "本月已与该宗门交战，请下月再战";
+    return null;
+  },
+  guardianError(d, ids, max, minRealm) {
+    if (!Array.isArray(ids) || ids.length > max || new Set(ids).size !== ids.length) return "护法人数无效";
+    if (ids.some(id => {
+      const g = this.state.disciples.find(x => x.id === id);
+      return !this.canGuard(d, g, minRealm);
+    })) return "护法须为同处本宗或分宗的健康高阶修士";
+    return null;
+  },
+  canBreakthrough(d) {
+    if (!d || !d.alive) return { err: "弟子不存在" };
+    if (!this.ritualAvailable(d)) return { err: "需健康且驻守本宗或分宗的弟子方可突破" };
+    if (d.realm >= 8 || (d.realm === 7 && d.stage === 3)) return { err: "请通过九霄雷劫渡劫飞升，不能普通突破" };
+    if (d.exp < stageExpNeed(d.realm, d.stage)) return { err: "修为未满" };
+    return { ok: true };
+  },
 
   // ---------- 岗位 ----------
   assignJob(bId, dId) {
     const s = this.state;
     const b = BUILDINGS[bId];
     if (!b) return "建筑不存在";
+    if (!(s.buildings[bId] > 0)) return "请先建造该建筑";
+    if (!b.jobs) return "该建筑没有岗位";
+    if (!this.available(s.disciples.find(d => d.id === dId))) return "弟子正在外出或疗伤，无法任职";
     if (!s.jobs[bId]) s.jobs[bId] = [];
     if (s.jobs[bId].includes(dId)) return "该弟子已在此岗位";
     if (s.jobs[bId].length >= b.jobs) return "岗位已满";
@@ -135,12 +186,14 @@ const Game = {
   upgradeBuilding(bId) {
     const s = this.state;
     const b = BUILDINGS[bId];
+    if (!b) return "建筑不存在";
     const lv = s.buildings[bId] || 0;
     if (lv >= b.maxLv) return "已达最高等级";
     const cost = this.upgradeCost(bId);
     if (!this.canAfford(cost)) return "资源不足";
     this.payCost(cost);
     s.buildings[bId] = lv + 1;
+    this.addHeritage(HERITAGE.sources.buildingLv, `${b.name}升级`);
     this.log(`【${b.name}】升至 ${lv + 1} 级。`, "good");
     return null;
   },
@@ -148,7 +201,9 @@ const Game = {
   // ---------- 招募 ----------
   recruit(method) {
     const s = this.state;
+    if (s.gameOver) return { err: "宗门已覆灭，请读档或重开" };
     const cfg = RECRUIT[method];
+    if (!cfg) return { err: "无效招募方式" };
     if (this.aliveDisciples().length >= this.capacity()) return { err: "弟子居已满，无法容纳更多弟子" };
     if (!this.canAfford(cfg.cost)) return { err: "灵石不足" };
     this.payCost(cfg.cost);
@@ -179,11 +234,14 @@ const Game = {
       + (this.qiyunBonus ? this.qiyunBonus() : 0);
     return Math.max(0.05, Math.min(0.98, rate));
   },
-  tryBreakthrough(dId, pills, guardianIds) {
+  tryBreakthrough(dId, pills = 0, guardianIds = []) {
     const s = this.state;
     const d = s.disciples.find(x => x.id === dId);
-    if (!d || !d.alive) return { err: "弟子不存在" };
-    if (d.injuredMonths > 0) return { err: "重伤未愈，无法突破" };
+    const check = this.canBreakthrough(d);
+    if (check.err) return check;
+    if (!Number.isInteger(pills) || pills < 0 || pills > BREAKTHROUGH.maxPill) return { err: "丹药数量无效" };
+    const guardErr = this.guardianError(d, guardianIds, 2, d.realm + 1);
+    if (guardErr) return { err: guardErr };
     const need = stageExpNeed(d.realm, d.stage);
     if (d.exp < need) return { err: "修为未满" };
     if (pills > 0) {
@@ -217,9 +275,7 @@ const Game = {
     } else if (penalty.type === "foundation") {
       d.foundationDmg = true;
     } else if (penalty.type === "death") {
-      d.alive = false;
-      this.removeFromJobs(d.id);
-      if (this.leaveLegacy) this.leaveLegacy(d);
+      this.removeDisciple(d);
       msg = `${d.name} 突破失败，走火入魔，身死道消！宗门上下一片哀恸。`;
     }
     d.loyalty = Math.max(0, d.loyalty - 5);
@@ -237,13 +293,19 @@ const Game = {
     const sect = s.sects.find(x => x.id === sectId);
     const act = DIPLO_ACTIONS.find(a => a.id === actionId);
     if (!sect || !act) return { err: "无效操作" };
+    if (sect.destroyed || sect.vassal || sect.broken) return { err: "该宗门当前不可执行此外交操作" };
+    if (actionId === "declare") return this.startWar(sect);
+    if (actionId === "trade" && sect.trade) return { err: "已开通贸易" };
+    if (actionId === "ally" && sect.allied) return { err: "已缔结同盟" };
+    if (sect.atWar && (actionId === "trade" || actionId === "ally")) return { err: "交战期间不可通商或结盟" };
+    if (actionId === "lecture" && sect.lastLectureMonth === this.monthKey()) return { err: "本月已讲学" };
     if (!this.canAfford(act.cost)) return { err: "资源不足" };
     if (act.needRel && sect.relation < act.needRel) return { err: `关系不足（需≥${act.needRel}）` };
-    if (act.needClass && !this.aliveDisciples().some(d => d.cls === act.needClass))
+    if (act.needClass && !this.aliveDisciples().some(d => this.available(d) && d.cls === act.needClass))
       return { err: "需要一名【传道】职业弟子" };
     this.payCost(act.cost);
 
-    if (actionId === "declare") return this.startWar(sect);
+    if (actionId === "lecture") sect.lastLectureMonth = this.monthKey();
     if (actionId === "ally") {
       sect.allied = true;
       this.log(`与【${sect.name}】缔结攻守同盟！`, "good");
@@ -253,18 +315,25 @@ const Game = {
       if (sect.trade) return { err: "已开通贸易" };
       sect.trade = true;
     }
-    sect.relation = clamp(sect.relation + act.rel, -100, 100);
+    const relGain = act.rel > 0 ? Math.round(act.rel * (1 + this.elderBonus("diplo"))) : act.rel;
+    sect.relation = clamp(sect.relation + relGain, -100, 100);
     if (act.rep) s.reputation += act.rep;
-    this.log(`对【${sect.name}】执行【${act.name}】，关系 ${act.rel >= 0 ? "+" : ""}${act.rel}（当前 ${sect.relation}）。`);
+    this.log(`对【${sect.name}】执行【${act.name}】，关系 ${relGain >= 0 ? "+" : ""}${relGain}（当前 ${sect.relation}）。`);
     return { ok: true, msg: `${act.name}完成：与【${sect.name}】关系变为 ${sect.relation}（${relationLevel(sect.relation).name}）` };
   },
 
   // ---------- 战争（小队级冲突） ----------
   startWar(sect) {
     const s = this.state;
+    const err = this.warError(sect);
+    if (err) return { err };
+    const fighters = this.aliveDisciples().filter(d => this.available(d));
+    if (!fighters.length) return { err: "没有可出战弟子" };
+    sect.lastWarMonth = this.monthKey();
     sect.atWar = true;
     sect.allied = false; sect.trade = false;
-    const myPower = this.sectPower();
+    if (s.alliance) s.alliance.members = s.alliance.members.filter(id => id !== sect.id);
+    const myPower = fighters.reduce((sum, d) => sum + this.disciplePower(d), 0);
     const theirPower = sect.power;
     // 战术加成由玩家在 UI 选择；此处用默认正面强攻
     const ratio = myPower / Math.max(1, theirPower);
@@ -283,7 +352,7 @@ const Game = {
     // 战败
     const loss = Math.round(s.resources.lingshi * 0.2);
     s.resources.lingshi -= loss;
-    const victim = this.randomAliveDisciple();
+    const victim = fighters[rnd(fighters.length)];
     if (victim) { victim.injuredMonths = 6; }
     s.reputation -= 3;
     this.log(`【战报】我军进攻【${sect.name}】失利，折损灵石×${loss}，${victim ? victim.name + "重伤" : ""}。`, "bad");
@@ -297,7 +366,10 @@ const Game = {
   // ---------- 月度结算（核心） ----------
   nextMonth() {
     const s = this.state;
-    if (s.gameOver) return { events: [] };
+    if (s.gameOver) return { err: "宗门已覆灭，请读档或重开" };
+    if ((s.pendingEvents || []).length) return { err: "请先处理本月事件" };
+    if (s.sects.some(sec => sec.broken)) return { err: "请先完成战后处置" };
+    if (this.aliveDisciples().some(d => d.tribulation)) return { err: "请先完成渡劫" };
     const msgs = [];
 
     // 1. 建筑产出（驻守弟子驱动；灵气潮汐闭关月停产）
@@ -308,14 +380,15 @@ const Game = {
       const b = BUILDINGS[bId];
       const lv = s.buildings[bId] || 0;
       if (!lv || !b.prod) continue;
+      if (bId === "danfang" && s.danfangHaltMonths > 0) continue;
       const workers = (s.jobs[bId] || [])
         .map(id => s.disciples.find(d => d.id === id))
-        .filter(d => d && d.alive);
+        .filter(d => this.available(d));
       if (!workers.length) continue;
       // 职业匹配度：匹配职业 ×1.5，否则 ×1（灵田灵矿任意均可）
       let eff = 0;
       workers.forEach(d => {
-        eff += (b.jobCat === "any" || b.jobCat === d.cls) ? 1.5 : 0.6;
+        eff += ((b.jobCat === "any" || b.jobCat === d.cls) ? 1.5 : 0.6) * (d.xinyi ? 0.75 : 1);
       });
       // 丹房消耗灵药
       if (b.consume) {
@@ -333,18 +406,14 @@ const Game = {
       });
     }
     if (s.veinDamageMonths > 0) s.veinDamageMonths--;
+    if (s.danfangHaltMonths > 0) s.danfangHaltMonths--;
 
-    // 2. 弟子修炼（仅演武场岗位）
-    (s.jobs.yanwu || []).forEach(id => {
-      const d = s.disciples.find(x => x.id === id);
-      if (!d || !d.alive || d.injuredMonths > 0) return;
-      const gain = this.cultivateSpeed(d) * 10;
-      d.exp = Math.min(d.exp + gain, stageExpNeed(d.realm, d.stage) * 1.0);
-    });
+    // 2. 在宗弟子正常修炼，生产岗位半速兼修；外出与重伤期间暂停。
+    this.aliveDisciples().forEach(d => this.addExp(d, this.cultivationGain(d)));
 
     // 3. 贸易收益
     s.sects.forEach(sec => {
-      if (sec.trade && !sec.atWar) {
+      if (sec.trade && !sec.atWar && !sec.destroyed && !sec.broken) {
         const profit = Math.round(20 + Math.max(0, sec.relation) * 0.5);
         s.resources.lingshi += profit;
       }
@@ -357,22 +426,20 @@ const Game = {
       d.age += 1 / 12;
       d.lifespanLeft -= 1 / 12;
       if (d.lifespanLeft <= 0) {
-        d.alive = false;
-        this.removeFromJobs(d.id);
-        if (this.leaveLegacy) this.leaveLegacy(d);
-        if (d.isLeader) {
-          msgs.push(`【讣告】掌门 ${d.name} 寿元耗尽，坐化于掌门宝座之上！请尽快选定继任者。`);
-          this.log(`掌门 ${d.name} 寿元耗尽坐化。宗门进入权力真空期。`, "bad");
-          this.handleLeaderDeath();
+        const wasLeader = d.isLeader;
+        this.removeDisciple(d);
+        if (wasLeader) {
+          msgs.push(`【讣告】掌门 ${d.name} 寿元耗尽坐化，宗门已自动推定继任者（如有）。`);
+          this.log(`掌门 ${d.name} 寿元耗尽坐化。`, "bad");
         } else {
           msgs.push(`${d.name} 寿元耗尽，无疾而终。`);
           this.log(`${d.name} 寿元耗尽，坐化而去。`, "bad");
         }
       }
+      if (!d.alive) return;
       // 低忠诚弟子可能出走
       if (d.loyalty <= 15 && !d.isLeader && Math.random() < 0.2) {
-        d.alive = false;
-        this.removeFromJobs(d.id);
+        this.removeDisciple(d, false);
         msgs.push(`【叛逃】${d.name} 对宗门心灰意冷，连夜下山不知所踪！`);
         this.log(`${d.name} 忠诚度归零，叛逃出宗。`, "bad");
       }
@@ -416,29 +483,42 @@ const Game = {
       msgs.push("【宗门覆灭】门中已无一名弟子，道统断绝……游戏结束。");
     }
 
+    s.pendingEvents = [];
+    if (!s.gameOver) {
+      if (factionEvt) s.pendingEvents.push({ type: "faction", ev: factionEvt });
+      if (worldEvt) s.pendingEvents.push({ type: "world", ev: worldEvt });
+      advReturns.forEach(({ d, ev }) => s.pendingEvents.push({ type: "adv", dId: d.id, ev }));
+      if (ev) s.pendingEvents.push({ type: "event", ev });
+    }
+    if (msgs.length) s.pendingEvents.push({ type: "msgs", list: msgs });
     this.autosave();
     return { msgs, event: ev, advReturns, factionEvt, worldEvt };
   },
 
   handleLeaderDeath() {
     const s = this.state;
+    s.disciples.forEach(d => { d.isLeader = false; });
     // 自动选境界最高者为继任掌门
     const candidates = this.aliveDisciples().sort((a, b) =>
       (b.realm * 4 + b.stage) - (a.realm * 4 + a.stage));
     if (candidates.length) {
-      candidates[0].isLeader = true;
+      const heir = candidates.find(d => this.atHome(d)) || candidates[0];
+      heir.isLeader = true;
+      heir.inBranch = false; heir.adventure = null;
+      s.caravans.forEach(c => { if (c.escortId === heir.id) c.escortId = null; });
       s.generation++;
-      this.log(`【传承】${candidates[0].name} 继任第 ${s.generation} 代掌门，肩负宗门兴衰。`, "good");
+      this.log(`【传承】${heir.name} 继任第 ${s.generation} 代掌门，肩负宗门兴衰。`, "good");
     }
   },
 
   worldTick(msgs) {
     const s = this.state;
     s.sects.forEach(sec => {
+      if (sec.destroyed || sec.broken) return;
       // 自主发展：实力缓慢浮动
       sec.power = Math.max(50, sec.power + ri(-8, 12));
       // 侵略性高的宗门可能主动挑衅玩家
-      if (!sec.atWar && sec.relation < -30 && Math.random() < sec.aggr * 0.15) {
+      if (!sec.vassal && !sec.atWar && sec.relation < -30 && Math.random() < sec.aggr * 0.15) {
         const loss = ri(20, 60);
         s.resources.lingshi = Math.max(0, s.resources.lingshi - loss);
         sec.relation = Math.max(-100, sec.relation - 10);
@@ -450,7 +530,9 @@ const Game = {
     });
     // 世界新闻
     if (Math.random() < 0.5) {
-      const pick2 = () => s.sects[rnd(s.sects.length)].name;
+      const active = s.sects.filter(x => !x.destroyed);
+      if (!active.length) return;
+      const pick2 = () => active[rnd(active.length)].name;
       let news = WORLD_NEWS[rnd(WORLD_NEWS.length)];
       news = news.replace("{s1}", pick2()).replace("{s2}", pick2());
       this.log("【修真界传闻】" + news);
@@ -472,7 +554,7 @@ const Game = {
     const weighted = pool.map(e => {
       let w = e.weight;
       if (e.bad) {
-        w = w * (1 - zhifaLv * 0.06) * (1 + s.chaos / 100);
+        w = w * Math.max(0.1, 1 - zhifaLv * 0.06 - this.elderBonus("order")) * (1 + s.chaos / 100);
       }
       return { item: e, w };
     });
@@ -480,6 +562,7 @@ const Game = {
   },
   applyEventOption(ev, optIdx) {
     const s = this.state;
+    if (!ev || !ev.options || !ev.options[optIdx]) return { err: "无效事件选项" };
     const opt = ev.options[optIdx];
     const ef = opt.effect;
     const out = [];
@@ -496,7 +579,8 @@ const Game = {
     if (ef.chaos) { s.chaos += ef.chaos; }
     // 特殊效果
     if (ef.recruitWounded) {
-      if (Math.random() < 0.7) {
+      if (this.aliveDisciples().length >= this.capacity()) out.push("弟子居已满，伤者康复后告辞。");
+      else if (Math.random() < 0.7) {
         const d = this.makeDisciple({ genius: Math.random() < 0.3 });
         s.disciples.push(d);
         out.push(`伤者${d.name}（${SPIRIT_ROOTS[d.root].name}）感恩戴德，拜入山门！`);
@@ -513,7 +597,7 @@ const Game = {
     }
     if (ef.cureDemon) {
       const d = this.strongestDisciple();
-      if (d) { d.exp += 20; out.push(`${d.name} 心魔尽去，修为精进。`); }
+      if (d) { this.addExp(d, 20); out.push(`${d.name} 心魔尽去，修为精进。`); }
     }
     if (ef.demonGamble) {
       const d = this.strongestDisciple();
@@ -545,14 +629,18 @@ const Game = {
       }
     }
     if (ef.relRandom) {
-      const sec = s.sects[rnd(s.sects.length)];
-      sec.relation = clamp(sec.relation + ef.relRandom, -100, 100);
-      out.push(`与【${sec.name}】关系 ${ef.relRandom > 0 ? "+" : ""}${ef.relRandom}`);
+      const active = s.sects.filter(x => !x.destroyed);
+      const sec = active[rnd(active.length)];
+      if (sec) {
+        sec.relation = clamp(sec.relation + ef.relRandom, -100, 100);
+        out.push(`与【${sec.name}】关系 ${ef.relRandom > 0 ? "+" : ""}${ef.relRandom}`);
+      }
     }
     if (ef.showForce) {
       const strong = this.sectPower() > 200;
-      const sec = s.sects[rnd(s.sects.length)];
-      sec.relation = clamp(sec.relation + (strong ? 5 : -8), -100, 100);
+      const active = s.sects.filter(x => !x.destroyed);
+      const sec = active[rnd(active.length)];
+      if (sec) sec.relation = clamp(sec.relation + (strong ? 5 : -8), -100, 100);
       if (strong) { s.reputation += 3; out.push(`来者见我宗兵强马壮，态度恭谨。声望+3`); }
       else out.push("来者暗中讥笑我宗羸弱，关系 -8。");
     }
@@ -564,7 +652,7 @@ const Game = {
     }
     if (ef.insightSelf) {
       const d = this.strongestDisciple();
-      if (d) { d.exp += 50; d.loyalty = Math.max(0, d.loyalty - 5); out.push(`${d.name} 独悟秘法，修为大涨，忠诚度 -5。`); }
+      if (d) { this.addExp(d, 50); d.loyalty = Math.max(0, d.loyalty - 5); out.push(`${d.name} 独悟秘法，修为大涨，忠诚度 -5。`); }
     }
     if (ef.punishDan) {
       const id = (s.jobs.danfang || [])[0];
@@ -588,6 +676,7 @@ const Game = {
         out.push("苦战方退兽潮，灵田受损（灵药-10），有弟子受伤。");
       }
     }
+    if (ef.haltDanfang) { s.danfangHaltMonths = 1; out.push("丹房停产一月。"); }
     this.log(`【事件·${ev.title}】${opt.label} → ${out.join("；") || "无事发生"}`);
     return { ok: true, msg: out.join("\n") || "风平浪静。" };
   },
@@ -604,10 +693,12 @@ const Game = {
   calcAssaultPower(formation) {
     const s = this.state;
     let total = 0;
+    const used = new Set();
     for (const row of ["front", "mid", "back"]) {
       (formation[row] || []).forEach(id => {
         const d = s.disciples.find(x => x.id === id);
-        if (!d || !d.alive || d.injuredMonths > 0) return;
+        if (!this.available(d) || used.has(id)) return;
+        used.add(id);
         const bonusMap = FORMATION_BONUS[row] || {};
         const mult = bonusMap[d.cls] !== undefined ? bonusMap[d.cls] : WAR_CONFIG.formationMismatch;
         total += this.disciplePower(d) * mult;
@@ -620,16 +711,30 @@ const Game = {
     const sect = s.sects.find(x => x.id === sectId);
     const tactic = TACTICS[tacticId];
     if (!sect || !tactic) return { err: "无效操作" };
+    const err = this.warError(sect);
+    if (err) return { err };
     if (sect.vassal) return { err: "对方已是我宗附庸" };
     if (sect.destroyed) return { err: "该宗门已覆灭" };
     if (sect.relation > WAR_CONFIG.assaultNeedRel) return { err: `关系未到敌对（需≤${WAR_CONFIG.assaultNeedRel}）` };
     const used = new Set();
-    for (const row of ["front", "mid", "back"]) (formation[row] || []).forEach(id => used.add(id));
+    if (!formation || typeof formation !== "object") return { err: "无效编队" };
+    for (const row of ["front", "mid", "back"]) {
+      const ids = formation[row] || [];
+      if (!Array.isArray(ids) || ids.length > 5) return { err: "每排最多五名弟子" };
+      for (const id of ids) {
+        if (used.has(id) || !this.available(s.disciples.find(d => d.id === id))) return { err: "编队存在重复或不可出战弟子" };
+        used.add(id);
+      }
+    }
     if (!used.size) return { err: "至少派遣一名弟子出战" };
     if (tacticId === "incite") {
       if (s.resources.lingshi < 200) return { err: "策反内应需灵石×200" };
       s.resources.lingshi -= 200;
     }
+    sect.lastWarMonth = this.monthKey();
+    sect.lastTactic = tacticId;
+    sect.atWar = true; sect.allied = false; sect.trade = false;
+    if (s.alliance) s.alliance.members = s.alliance.members.filter(id => id !== sect.id);
     const atk = this.calcAssaultPower(formation);
     const def = Math.round(sect.power * (1 + WAR_CONFIG.defenseArrayBonus));
     const ratio = atk / Math.max(1, def);
@@ -666,12 +771,14 @@ const Game = {
     const s = this.state;
     const sect = s.sects.find(x => x.id === sectId);
     if (!sect || !sect.broken) return { err: "该宗门山门未破" };
+    if (!["destroy", "vassal", "merge"].includes(choice)) return { err: "无效的处置方式" };
     sect.broken = false;
+    sect.allied = false; sect.trade = false;
     if (choice === "destroy") {
       const loot = { lingshi: ri(200, 400), lingyao: ri(15, 40), kuangshi: ri(20, 50), danyao: ri(2, 8) };
       this.gainRes(loot);
       let captives = 0;
-      if (Math.random() < WAR_CONFIG.captiveRate && this.aliveDisciples().length < this.capacity()) {
+      if (Math.random() < WAR_CONFIG.captiveRate * (sect.lastTactic === "siege" ? 1.5 : 1) && this.aliveDisciples().length < this.capacity()) {
         const d = this.makeDisciple({ realm: 0 });
         d.loyalty = 20;
         s.disciples.push(d); captives = 1;
@@ -748,15 +855,16 @@ const Game = {
     if (!route || !goods) return { err: "无效路线或商品" };
     if (!route.goods.includes(goodsId)) return { err: "该路线不经营此商品" };
     if (s.caravans.some(c => c)) return { err: "同时只能有一支商队在外" };
-    amount = Math.max(1, Math.min(amount, Math.floor((s.resources[goodsId] || 0))));
+    if (!Number.isInteger(amount) || amount <= 0) return { err: "货物数量须为正整数" };
     const cost = goods.unitCost * amount;
     if (s.resources.lingshi < cost) return { err: `灵石不足（货款需 ${cost}）` };
     if (escortId) {
       const esc = s.disciples.find(d => d.id === escortId);
-      if (!esc || !esc.alive || esc.injuredMonths > 0) return { err: "护送弟子不可用" };
+      if (!this.available(esc)) return { err: "护送弟子不可用" };
+      if (this.hasJob(esc)) return { err: "请先解除护送弟子的岗位" };
     }
     s.resources.lingshi -= cost;
-    s.caravans.push({ routeId, goodsId, amount, escortId, monthsLeft: route.months });
+    s.caravans.push({ routeId, goodsId, amount, escortId, cost, monthsLeft: route.months });
     this.log(`商队出发：【${route.name}】，贩运${goods.name}×${amount}（货款灵石×${cost}），${route.months} 个月后归返。`);
     return { ok: true };
   },
@@ -781,7 +889,7 @@ const Game = {
         this.log(`商队在【${route.name}】遇劫，损失惨重。`, "bad");
       } else {
         const profit = Math.round(route.profit * (1 + c.amount / 10));
-        s.resources.lingshi += profit;
+        s.resources.lingshi += (c.cost ?? goods.unitCost * c.amount) + profit;
         msgs.push(`【商队归来】${goods.name}畅销，净赚灵石×${profit}！`);
         this.log(`商队自【${route.name}】归来，获利灵石×${profit}。`, "good");
       }
@@ -794,6 +902,7 @@ const Game = {
     const d = s.disciples.find(x => x.id === dId);
     const place = ADVENTURE_PLACES.find(p => p.id === placeId);
     if (!d || !d.alive || !place) return { err: "无效操作" };
+    if (!this.available(d)) return { err: "该弟子当前不可派遣" };
     if (d.injuredMonths > 0) return { err: "重伤弟子无法历练" };
     if (d.adventure) return { err: "该弟子已在外历练" };
     if (this.hasJob(d)) return { err: "请先解除该弟子的岗位" };
@@ -819,6 +928,7 @@ const Game = {
   },
   applyAdvOption(d, ev, optIdx) {
     const s = this.state;
+    if (!d || !d.alive || !ev || !ev.options || !ev.options[optIdx]) return { err: "无效历练选项" };
     const opt = ev.options[optIdx];
     const ef = opt.effect;
     const out = [];
@@ -826,6 +936,7 @@ const Game = {
       for (const [k, v] of Object.entries(ef.res))
         if (v < 0 && (s.resources[k] || 0) < -v) return { err: "资源不足，无法选择此项" };
       this.gainRes(ef.res);
+      out.push(this.resourceText(ef.res));
     }
     if (ef.luck) { d.luck = clamp(d.luck + ef.luck, 0, 100); out.push(`气运 ${ef.luck > 0 ? "+" : ""}${ef.luck}`); }
     if (ef.loyalty) { d.loyalty = clamp(d.loyalty + ef.loyalty, 0, 100); out.push(`忠诚度 ${ef.loyalty > 0 ? "+" : ""}${ef.loyalty}`); }
@@ -843,7 +954,7 @@ const Game = {
       else { d.injuredMonths = 3; out.push("寡不敌众，负伤遁走……"); }
     }
     if (ef.legacyExp) {
-      d.exp += stageExpNeed(d.realm, d.stage) * 0.5;
+      this.addExp(d, stageExpNeed(d.realm, d.stage) * 0.5);
       out.push("古修士感悟灌顶，修为大涨！");
     }
     if (ef.fakePill) {
@@ -872,22 +983,86 @@ const Game = {
   saveKey(slot) { return `zm_cql_save_${slot}`; },
   save(slot) {
     try {
+      this.state.saveVersion = 2;
       localStorage.setItem(this.saveKey(slot), JSON.stringify(this.state));
       return true;
     } catch (e) { return false; }
   },
   load(slot) {
-    const raw = localStorage.getItem(this.saveKey(slot));
-    if (!raw) return false;
-    this.state = JSON.parse(raw);
-    return true;
+    try {
+      const raw = localStorage.getItem(this.saveKey(slot));
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.disciples) || !Array.isArray(parsed.sects) ||
+          !parsed.resources || !parsed.buildings || !Number.isInteger(parsed.year) || parsed.year < 1 ||
+          !Number.isInteger(parsed.month) || parsed.month < 1 || parsed.month > 12) return false;
+      const ids = new Set();
+      for (const d of parsed.disciples) {
+        if (!Number.isInteger(d.id) || ids.has(d.id) || !REALMS[d.realm] || !STAGES[d.stage] ||
+            !SPIRIT_ROOTS[d.root] || !CLASSES[d.cls] || !Number.isFinite(d.exp) || !Number.isFinite(d.lifespanLeft) ||
+            ![d.age, d.comprehension, d.luck, d.loyalty].every(Number.isFinite) || typeof d.name !== "string") return false;
+        ids.add(d.id);
+      }
+      for (const key of Object.keys(RESOURCES)) if (!Number.isFinite(parsed.resources[key]) || parsed.resources[key] < 0) return false;
+      for (const [key, lv] of Object.entries(parsed.buildings)) if (!BUILDINGS[key] || !Number.isInteger(lv) || lv < 0 || lv > BUILDINGS[key].maxLv) return false;
+      const s = Object.assign(JSON.parse(JSON.stringify(INITIAL_STATE)), { jobs: {}, caravans: [], log: [], generation: 1,
+        chaos: 0, veinDamageMonths: 0, insightBoostMonths: 0, pendingEvents: [] }, parsed);
+      s.nextId = Math.max(s.nextId || 1, ...s.disciples.map(d => d.id + 1));
+      s.jobs = s.jobs && typeof s.jobs === "object" ? s.jobs : {};
+      s.caravans = Array.isArray(s.caravans) ? s.caravans.filter(c => c && TRADE_ROUTES.some(r => r.id === c.routeId && r.goods.includes(c.goodsId)) && TRADE_GOODS[c.goodsId] && Number.isInteger(c.amount) && c.amount > 0 && Number.isFinite(c.monthsLeft)) : [];
+      s.log = Array.isArray(s.log) ? s.log : [];
+      s.pendingEvents = Array.isArray(s.pendingEvents) ? s.pendingEvents : [];
+      if (s.pendingEvents.some(item => !item || !["faction", "world", "adv", "event", "msgs"].includes(item.type) ||
+          (item.type === "msgs" ? !Array.isArray(item.list) : !item.ev || typeof item.ev.text !== "string" || !Array.isArray(item.ev.options)))) return false;
+      for (const sec of s.sects) if (!NPC_SECTS_TEMPLATE.some(x => x.id === sec.id) || !Number.isFinite(sec.power) || !Number.isFinite(sec.relation)) return false;
+      s.sects.forEach(sec => { if (sec.destroyed) { sec.power = 0; sec.allied = false; sec.trade = false; sec.atWar = false; sec.broken = false; sec.vassal = false; } });
+      if (s.alliance && (!Array.isArray(s.alliance.members) || !Number.isFinite(s.alliance.prestige))) return false;
+      if (s.branch && !Array.isArray(s.branch.disciples)) return false;
+      if (s.branch && !Array.isArray(s.spiritSects)) s.spiritSects = JSON.parse(JSON.stringify(SPIRIT_SECTS));
+      for (const d of s.disciples) {
+        // 旧版本可通过普通突破误入渡劫境，修正为待渡劫的大乘圆满。
+        if (d.alive && d.realm === 8) { d.realm = 7; d.stage = 3; d.exp = stageExpNeed(7, 3); }
+        d.exp = clamp(d.exp, 0, stageExpNeed(d.realm, d.stage));
+        d.injuredMonths = Number.isFinite(d.injuredMonths) ? Math.max(0, d.injuredMonths) : 0;
+        if (d.adventure && (!ADVENTURE_PLACES.some(p => p.id === d.adventure.placeId) || !Number.isFinite(d.adventure.monthsLeft))) return false;
+        if (d.tribulation && (d.realm !== 7 || d.stage !== 3 || !Number.isInteger(d.tribulation.wave) || d.tribulation.wave < 1 || d.tribulation.wave >= DUJIE.waves ||
+            !Number.isInteger(d.tribulation.pills) || d.tribulation.pills < 0 || d.tribulation.pills > DUJIE.maxPill ||
+            !Array.isArray(d.tribulation.guardians) || d.tribulation.guardians.length > DUJIE.maxGuardian || new Set(d.tribulation.guardians).size !== d.tribulation.guardians.length ||
+            d.tribulation.guardians.some(id => !s.disciples.some(g => g.id === id && g.alive && g.realm >= 6)))) return false;
+      }
+      const employed = new Set();
+      for (const [key, list] of Object.entries(s.jobs)) {
+        if (!BUILDINGS[key] || !s.buildings[key] || !Array.isArray(list)) { delete s.jobs[key]; continue; }
+        let count = 0;
+        s.jobs[key] = list.filter(id => {
+          const d = s.disciples.find(x => x.id === id);
+          if (count >= BUILDINGS[key].jobs || !d || !d.alive || d.adventure || d.inBranch || d.tribulation || s.caravans.some(c => c.escortId === id) || employed.has(id)) return false;
+          employed.add(id); count++; return true;
+        });
+      }
+      this.state = s;
+      const leaders = this.aliveDisciples().filter(d => d.isLeader);
+      if (!leaders.length && this.aliveDisciples().length) this.handleLeaderDeath();
+      else if (leaders.length > 1) leaders.slice(1).forEach(d => { d.isLeader = false; });
+      s.gameOver = !this.aliveDisciples().length;
+      return true;
+    } catch (e) { return false; }
   },
   saveInfo(slot) {
-    const raw = localStorage.getItem(this.saveKey(slot));
-    if (!raw) return null;
-    const s = JSON.parse(raw);
-    return { year: s.year, month: s.month, sectName: s.sectName, gen: s.generation, disciples: s.disciples.filter(d => d.alive).length };
+    try {
+      const raw = localStorage.getItem(this.saveKey(slot));
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      if (!s || !Array.isArray(s.disciples)) return null;
+      return { year: s.year, month: s.month, sectName: s.sectName, gen: s.generation, disciples: s.disciples.filter(d => d.alive).length };
+    } catch (e) { return null; }
   },
+  completePendingEvent() {
+    (this.state.pendingEvents || []).shift();
+    if (this.state.gameOver) this.state.pendingEvents = this.state.pendingEvents.filter(item => item.type === "msgs");
+    this.autosave();
+  },
+  resourceText(res) { return Object.entries(res).map(([k, v]) => `${RESOURCES[k].name}${v > 0 ? "+" : ""}${v}`).join("，"); },
   autosave() { this.save(0); },
   log(text, cls) {
     const s = this.state;
@@ -927,6 +1102,7 @@ Object.assign(Game, {
   // ---------- 客卿 ----------
   recruitKeqing() {
     const s = this.state;
+    if (s.gameOver) return { err: "宗门已覆灭，请读档或重开" };
     if (!this.canAfford(KEQING.recruitCost)) return { err: "灵石不足（需500）" };
     if (this.aliveDisciples().length >= this.capacity()) return { err: "弟子容纳已满" };
     this.payCost(KEQING.recruitCost);
@@ -934,7 +1110,7 @@ Object.assign(Game, {
     const d = this.makeDisciple({ realm });
     d.keqing = true;
     d.loyalty = KEQING.loyaltyInit;
-    d.age = ri(60, 300);
+    d.age = ri(60, Math.min(300, REALMS[realm].lifespan - 20));
     d.lifespanLeft = REALMS[realm].lifespan - d.age;
     s.disciples.push(d);
     this.log(`散修高手 ${d.name}（${REALMS[realm].name}期）挂单入宗为客卿，月俸灵石×${KEQING.salaryBase[realm]}。`, "good");
@@ -944,14 +1120,13 @@ Object.assign(Game, {
     const s = this.state;
     s.disciples.forEach(d => {
       if (!d.alive || !d.keqing) return;
-      const salary = KEQING.salaryBase[d.realm] || 10;
+      const salary = KEQING.salaryBase[d.realm] ?? 10;
       if (s.resources.lingshi >= salary) {
         s.resources.lingshi -= salary;
         d.loyalty = clamp(d.loyalty + 1, 0, 100); // 供奉到位，缓慢归心
       } else {
         // 发不起俸禄，客卿离去
-        d.alive = false;
-        this.removeFromJobs(d.id);
+        this.removeDisciple(d, false);
         msgs.push(`【客卿离去】拖欠俸禄，客卿 ${d.name} 拂袖而去。`);
         this.log(`客卿 ${d.name} 因俸禄被拖欠而离宗。`, "bad");
       }
@@ -1016,6 +1191,7 @@ Object.assign(Game, {
   },
   applyFactionChoice(optIdx) {
     const s = this.state;
+    if (![0, 1, 2].includes(optIdx)) return { err: "无效裁决" };
     const out = [];
     const apply = (facKey, delta) => {
       this.aliveDisciples().forEach(d => {
@@ -1055,7 +1231,7 @@ Object.assign(Game, {
       const heir = this.aliveDisciples().filter(x => x.id !== d.id)
         .sort((a, b) => b.comprehension - a.comprehension)[0];
       if (heir) {
-        heir.exp += stageExpNeed(heir.realm, heir.stage) * 0.5;
+        this.addExp(heir, stageExpNeed(heir.realm, heir.stage) * 0.5);
         heir.comprehension = Math.min(99, heir.comprehension + 3);
         this.addHeritage(HERITAGE.sources.legacyCave, `${d.name}留下传承洞府`);
         this.log(`【传承】${d.name} 坐化前留下传承洞府，${heir.name} 入内参悟，修为悟性大进！`, "good");
@@ -1087,6 +1263,9 @@ Object.assign(Game, {
   councilTopic() { return COUNCIL_TOPICS[rnd(COUNCIL_TOPICS.length)]; },
   applyCouncil(topic, optIdx) {
     const s = this.state;
+    if (!s.alliance) return { err: "尚未建立联盟" };
+    if (s.alliance.lastCouncilMonth === this.monthKey()) return { err: "本月已议事，请下月再议" };
+    if (!topic || !topic.options || !topic.options[optIdx]) return { err: "无效议事选项" };
     const ef = topic.options[optIdx].effect;
     const out = [];
     if (ef.res) {
@@ -1109,9 +1288,10 @@ Object.assign(Game, {
       }
     }
     if (ef.allExp) {
-      this.aliveDisciples().forEach(d => d.exp += ef.allExp);
+      this.aliveDisciples().forEach(d => this.addExp(d, ef.allExp));
       out.push(`全宗弟子修为 +${ef.allExp}`);
     }
+    s.alliance.lastCouncilMonth = this.monthKey();
     this.log(`【联盟议事·${topic.title}】${topic.options[optIdx].label} → ${out.join("；") || "散会"}`);
     return { ok: true, msg: out.join("\n") || "议事已毕。" };
   },
@@ -1122,7 +1302,7 @@ Object.assign(Game, {
     if (s.alliance.raidCd > 0) return { err: `讨伐冷却中（${s.alliance.raidCd} 个月）` };
     const allyPower = s.alliance.members.reduce((sum, id) => {
       const sec = s.sects.find(x => x.id === id);
-      return sum + (sec && !sec.destroyed ? Math.round(sec.power * 0.5) : 0);
+      return sum + (sec && sec.allied && !sec.destroyed && !sec.broken ? Math.round(sec.power * 0.5) : 0);
     }, 0);
     const total = this.sectPower() + allyPower;
     const enemy = ALLIANCE_CFG.modaoBase + s.year * 30; // 魔道逐年变强
@@ -1183,7 +1363,7 @@ Object.assign(Game, {
     if (!d || !d.alive) return { err: "弟子不存在" };
     if (d.realm !== 7 || d.stage !== 3) return { err: "需大乘期圆满方可渡劫" };
     if (d.exp < stageExpNeed(7, 3)) return { err: "修为未满" };
-    if (d.injuredMonths > 0) return { err: "重伤未愈，不可渡劫" };
+    if (!d.tribulation && !this.ritualAvailable(d)) return { err: "需健康且驻守本宗或分宗的弟子方可渡劫" };
     if (!this.state.spiritChannel) return { err: "灵界通道未贯通，天路未开，无法渡劫" };
     return { ok: true };
   },
@@ -1201,38 +1381,50 @@ Object.assign(Game, {
     const d = s.disciples.find(x => x.id === dId);
     const chk = this.canDujie(d);
     if (chk.err) return { err: chk.err };
-    if (wave === 1) { // 第一波扣丹药
-      if (pills > 0) {
-        if (s.resources.danyao < pills) return { err: "丹药不足" };
-        s.resources.danyao -= pills;
-      }
+    const progress = d.tribulation;
+    if (!Number.isInteger(wave) || wave !== (progress ? progress.wave + 1 : 1) || wave > DUJIE.waves)
+      return { err: "请依次承受九道天雷" };
+    if (progress) {
+      pills = progress.pills; guardianIds = progress.guardians;
+    } else {
+      if (!Number.isInteger(pills) || pills < 0 || pills > DUJIE.maxPill) return { err: "丹药数量无效" };
+      const guardErr = this.guardianError(d, guardianIds, DUJIE.maxGuardian, 6);
+      if (guardErr) return { err: guardErr };
+      if (s.resources.danyao < pills) return { err: "丹药不足" };
+      s.resources.danyao -= pills;
+      this.removeFromJobs(d.id);
+      d.tribulation = { wave: 0, pills, guardians: guardianIds.slice() };
     }
     const rate = this.dujieWaveRate(pills, guardianIds.length);
     const pass = Math.random() < rate;
     if (!pass) {
+      d.tribulation = null;
       const penalty = weightedObjPick(DUJIE.failTable);
       let msg = `第 ${wave} 道天雷落下，${d.name} 未能扛住——${penalty.text}！`;
       if (penalty.type === "injured") { d.realm = 7; d.stage = 0; d.exp = 0; d.injuredMonths = 36; }
       else if (penalty.type === "foundation") { d.foundationDmg = true; d.exp = 0; d.injuredMonths = 24; }
-      else { d.alive = false; this.removeFromJobs(d.id); this.leaveLegacy(d); }
+      else { this.removeDisciple(d); }
       this.log(`【渡劫失败】${d.name} 折戟于第 ${wave} 道天雷，${penalty.text}。`, "bad");
+      this.autosave();
       return { ok: true, wave, passed: false, finished: true, success: false, msg };
     }
     if (wave >= DUJIE.waves) {
       // 飞升成功
-      d.alive = false; d.ascended = true;
-      this.removeFromJobs(d.id);
-      if (d.isLeader) { d.isLeader = false; this.handleLeaderDeath(); }
+      d.ascended = true;
+      this.removeDisciple(d, false);
       this.addHeritage(15, `${d.name} 飞升仙界`);
       this.addQiyun(8, "飞升祥瑞");
       s.reputation += 20;
       // 留下本命传承：最强后辈获益
       const heir = this.aliveDisciples().sort((a, b) => b.comprehension - a.comprehension)[0];
-      if (heir) { heir.exp += stageExpNeed(heir.realm, heir.stage); heir.comprehension = Math.min(99, heir.comprehension + 5); }
+      if (heir) { this.addExp(heir, stageExpNeed(heir.realm, heir.stage)); heir.comprehension = Math.min(99, heir.comprehension + 5); }
       this.log(`【飞升】九霄雷散，霞光万道！${d.name} 功德圆满，飞升仙界！留下本命传承福泽后人。`, "good");
+      this.autosave();
       return { ok: true, wave, passed: true, finished: true, success: true,
-        msg: `九道天雷尽数扛过！${d.name} 霞举飞升，名列仙籍！\n声望 +20、底蕴 +15、气运 +8${heir ? `\n本命传承归于 ${heir.name}（修为大涨、悟性 +5）` : ""}\n${d.name === undefined ? "" : ""}宗门已自动推定继任掌门（如需）。` };
+        msg: `九道天雷尽数扛过！${d.name} 霞举飞升，名列仙籍！\n声望 +20、底蕴 +15、气运 +8${heir ? `\n本命传承归于 ${heir.name}（修为大涨、悟性 +5）` : ""}\n宗门已自动推定继任掌门（如需）。` };
     }
+    d.tribulation.wave = wave;
+    this.autosave();
     return { ok: true, wave, passed: true, finished: false,
       msg: `第 ${wave} 道天雷——扛住了！（当前每雷成功率 ${Math.round(rate * 100)}%）` };
   },
@@ -1243,12 +1435,14 @@ Object.assign(Game, {
     if (!s.spiritChannel) return { err: "灵界通道未贯通" };
     if (s.branch) return { err: "分宗已建立" };
     if (!this.canAfford(SPIRIT_BRANCH.establishCost)) return { err: "资源不足（灵石×2000、灵药×200、矿石×200）" };
-    const list = dIds.map(id => s.disciples.find(d => d.id === id))
-      .filter(d => d && d.alive && d.realm >= SPIRIT_BRANCH.minRealm && !d.isLeader && d.injuredMonths <= 0 && !d.adventure);
+    if (!Array.isArray(dIds) || new Set(dIds).size !== dIds.length) return { err: "派驻名单不可重复" };
+    const list = dIds.map(id => s.disciples.find(d => d.id === id));
+    if (list.some(d => !this.available(d) || d.realm < SPIRIT_BRANCH.minRealm || d.isLeader))
+      return { err: "派驻弟子须健康、在宗、达到金丹期且不是掌门" };
     if (list.length < SPIRIT_BRANCH.minDisciple) return { err: `至少需 ${SPIRIT_BRANCH.minDisciple} 名金丹期以上健康弟子（掌门不可派驻）` };
     this.payCost(SPIRIT_BRANCH.establishCost);
     list.forEach(d => { d.inBranch = true; this.removeFromJobs(d.id); });
-    s.branch = { disciples: dIds.slice(), spiritRep: 0 };
+    s.branch = { disciples: list.map(d => d.id), spiritRep: 0 };
     s.spiritSects = JSON.parse(JSON.stringify(SPIRIT_SECTS));
     this.log(`【开疆】灵界分宗立！${list.map(d => d.name).join("、")} 共 ${list.length} 人跨界驻守。`, "good");
     return { ok: true, msg: `灵界分宗建立！${list.length} 名弟子跨界驻守，每月按分宗战力产出灵石与灵药。` };
@@ -1256,7 +1450,7 @@ Object.assign(Game, {
   branchPower() {
     const s = this.state;
     if (!s.branch) return 0;
-    return s.disciples.filter(d => d.alive && d.inBranch)
+    return s.disciples.filter(d => d.alive && d.inBranch && d.injuredMonths <= 0)
       .reduce((sum, d) => sum + this.disciplePower(d), 0);
   },
   branchTick(msgs) {
@@ -1282,6 +1476,7 @@ Object.assign(Game, {
   },
   spiritDiplo(sectId, action) {
     const s = this.state;
+    if (!s.branch) return { err: "请先建立灵界分宗" };
     const sec = (s.spiritSects || []).find(x => x.id === sectId);
     if (!sec) return { err: "无效对象" };
     if (action === "gift") {
@@ -1292,6 +1487,8 @@ Object.assign(Game, {
     }
     if (action === "trade") {
       if (sec.relation < 20) return { err: "关系不足（需≥20）" };
+      if (sec.lastTradeMonth === this.monthKey()) return { err: "本月已与该宗完成跨界贸易" };
+      sec.lastTradeMonth = this.monthKey();
       const gain = ri(200, 400);
       s.resources.lingshi += gain;
       return { ok: true, msg: `与【${sec.name}】完成一笔跨界贸易，获利灵石×${gain}。` };
@@ -1311,7 +1508,9 @@ Object.assign(Game, {
   },
   applyWorldEvent(ev, optIdx) {
     const s = this.state;
+    if (!ev || !ev.options || !ev.options[optIdx]) return { err: "无效事件选项" };
     const ef = ev.options[optIdx].effect;
+    if (ef.tianmoWar && !s.alliance) return { err: "需先建立联盟方可共讨天魔" };
     const out = [];
     if (ef.res) {
       for (const [k, v] of Object.entries(ef.res))
@@ -1344,17 +1543,17 @@ Object.assign(Game, {
       const d = young[rnd(young.length)];
       if (d) {
         if (Math.random() < 0.2) {
-          d.alive = false; this.removeFromJobs(d.id);
+          this.removeDisciple(d);
           out.push(`${d.name} 陨落于秘境深处……宗门上下扼腕。`);
         } else {
           d.comprehension = Math.min(99, d.comprehension + 5);
-          d.exp += stageExpNeed(d.realm, d.stage);
+          this.addExp(d, stageExpNeed(d.realm, d.stage));
           out.push(`${d.name} 秘境悟道：悟性 +5、修为大涨！`);
         }
       } else out.push("门中无合适弟子可派。");
     }
     if (ef.tideCultivate) {
-      this.aliveDisciples().forEach(d => { d.exp += stageExpNeed(d.realm, d.stage) * 0.8; });
+      this.aliveDisciples().forEach(d => { this.addExp(d, stageExpNeed(d.realm, d.stage) * 0.8); });
       s.tideHaltMonths = 1;
       out.push("全宗闭关，修为一日千里！（本月建筑停产）");
     }

@@ -201,6 +201,7 @@ tr:hover td { background: rgba(255,255,255,.03); }
 .war-row { background: var(--panel-light); border: 0.0625rem solid var(--border); border-radius: 0.375rem; padding: 0.5rem; min-height: 5.625rem; }
 .war-row h4 { color: var(--gold); font-size: 0.8125rem; margin-bottom: 0.375rem; }
 .war-row .tag { margin-bottom: 0.25rem; cursor: pointer; }
+.war-candidate { display: flex; align-items: center; flex-wrap: wrap; gap: 0.375rem; margin: 0.375rem 0; }
 .tactic-btn { flex: 1; }
 
 /* ==================== v1.1.0 画面焕新 ==================== */

@@ -39,6 +39,7 @@ const UI = {
       if (e.target.closest(".btn") && !e.target.closest(".btn:disabled")) this.sfx("click");
     });
     this.render();
+    this._drainQueue();
   },
 
   switchView(v) {
@@ -203,10 +204,10 @@ const UI = {
         <td>${Game.disciplePower(d)}</td>
         <td>${d.loyalty}</td>
         <td>${Math.floor(d.lifespanLeft)}年</td>
-        <td>${d.adventure ? "历练中" : (jobName ? BUILDINGS[jobName[0]].name : "空闲")}</td>
+        <td>${d.tribulation ? "渡劫中" : d.inBranch ? "分宗驻守" : Game.escorting(d) ? "商队护送" : d.adventure ? "历练中" : (jobName ? BUILDINGS[jobName[0]].name : "空闲")}</td>
         <td>
-          ${ready && d.injuredMonths <= 0 ? `<button class="btn small primary" onclick="UI.showBreakthrough(${d.id})">突破</button>` : ""}
-          ${d.realm === 7 && d.stage === 3 && d.exp >= stageExpNeed(7, 3) ? `<button class="btn small danger" onclick="UI.showDujie(${d.id})">渡劫</button>` : ""}
+          ${ready && !Game.canBreakthrough(d).err ? `<button class="btn small primary" onclick="UI.showBreakthrough(${d.id})">突破</button>` : ""}
+          ${d.realm === 7 && d.stage === 3 && d.exp >= stageExpNeed(7, 3) ? `<button class="btn small danger" onclick="UI.showDujie(${d.id})">${d.tribulation ? "继续渡劫" : "渡劫"}</button>` : ""}
           <button class="btn small" onclick="UI.showDiscipleDetail(${d.id})">详情</button>
         </td>
       </tr>`;
@@ -231,7 +232,7 @@ const UI = {
 职业：${CLASSES[d.cls].name}（${CLASSES[d.cls].cat}类 - ${CLASSES[d.cls].desc}）
 心性：${d.personality}　气运：${d.luck}　悟性：${d.comprehension}
 忠诚度：${d.loyalty}　综合战力：${Game.disciplePower(d)}
-修炼速度：${Game.cultivateSpeed(d).toFixed(2)}/月
+每月修为增长：${Game.cultivationGain(d).toFixed(2)}（空闲正常修炼，生产岗位半速兼修）
 ${d.injuredMonths > 0 ? `⚠ 重伤中，还需 ${d.injuredMonths} 个月恢复\n` : ""}
 ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       </div>
@@ -242,11 +243,13 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   showBreakthrough(id) {
     const s = Game.state;
     const d = s.disciples.find(x => x.id === id);
+    const check = Game.canBreakthrough(d);
+    if (check.err) return this.toast(check.err);
     const info = Game.breakthroughInfo(d);
-    let pills = 0, guardians = [];
     const render = () => {
+      const { pills, guardians } = this._btState;
       const rate = Game.breakthroughRate(d, pills, guardians.length);
-      const elder = Game.aliveDisciples().filter(x => x.id !== d.id && x.realm > d.realm && x.injuredMonths <= 0);
+      const elder = Game.aliveDisciples().filter(x => Game.canGuard(d, x, d.realm + 1));
       this.modal(`
         <h2>${info.isMajor ? "大境界突破" : "小阶突破"} —— ${d.name}</h2>
         <div class="modal-text">
@@ -256,7 +259,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
 护法修士：${guardians.length} 名（每名 +5%）
 气运加成：${d.luck > 50 ? "+" : ""}${Math.round((d.luck - 50) / 5)}%
 <b style="color:var(--gold)">当前成功率：${Math.round(rate * 100)}%</b>
-失败惩罚（大境界突破）：掉境 40% / 重伤 35% / 根基受损 20% / 陨落 5%
+失败惩罚：掉境 40% / 重伤 35% / 根基受损 20% / 陨落 5%
         </div>
         <div class="modal-options">
           <button class="btn opt-btn" onclick="UI._btPill(${id},1)">服用丹药 +1</button>
@@ -284,9 +287,11 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     this._btState.render();
   },
   _btGo(id) {
+    if (!this._btState) return;
     const { pills, guardians } = this._btState;
     const r = Game.tryBreakthrough(id, pills, guardians);
     if (r.err) return this.toast(r.err);
+    this._btState = null;
     this.sfx(r.ok ? "breakthrough_success" : "breakthrough_fail");
     if (r.ok) this.sfx("realm_up");
     const d = Game.state.disciples.find(x => x.id === id);
@@ -310,7 +315,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       const costText = lv >= b.maxLv ? "已满级" :
         Object.entries(cost).map(([k, v]) => `${RESOURCES[k].name}×${v}`).join(" ");
       const workers = (s.jobs[id] || []).map(did => s.disciples.find(d => d.id === did)).filter(d => d && d.alive);
-      const idle = Game.aliveDisciples().filter(d => !Game.hasJob(d));
+      const idle = Game.aliveDisciples().filter(d => Game.available(d) && !Game.hasJob(d));
       return `<div class="panel">
         <h3><img class="b-icon" src="assets/icon_${id}.png" alt="" onerror="this.style.display='none'">${b.name} <span style="color:var(--text-dim);font-size:0.8125rem">Lv.${lv}/${b.maxLv}</span></h3>
         <p style="color:var(--text-dim);margin-bottom:8px">${b.desc}</p>
@@ -321,7 +326,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         ${id === "yanwu" ? `<p>修炼中：${workers.map(d => `<span class="tag">${d.name}<a href="javascript:;" onclick="UI.unassign('${id}',${d.id})" style="color:#d05a4e;text-decoration:none"> ✕</a></span>`).join("") || "无"}</p>` : ""}
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
           <button class="btn small" ${lv >= b.maxLv ? "disabled" : ""} onclick="UI.confirmUpgrade('${id}')">升级（${costText}）</button>
-          ${b.jobs > 0 && idle.length ? `<select id="assign-sel-${id}" style="background:var(--panel-light);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px">
+          ${lv > 0 && b.jobs > 0 && workers.length < b.jobs && idle.length ? `<select id="assign-sel-${id}" style="background:var(--panel-light);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px">
               ${idle.map(d => `<option value="${d.id}">${d.name}（${CLASSES[d.cls].name}）</option>`).join("")}
             </select>
             <button class="btn small" onclick="UI.assign('${id}')">派驻</button>` : ""}
@@ -329,7 +334,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       </div>`;
     }).join("");
     el.innerHTML = `<div class="grid cols-2">${cards}</div>
-      <p class="scroll-hint">建筑须派驻对应职业弟子方有产出：职业匹配效率×1.5，不匹配×0.6。演武场为修炼岗位，人数不限。</p>`;
+      <p class="scroll-hint">产业须派驻健康在宗弟子方有产出：职业匹配效率×1.5，不匹配×0.6。空闲弟子正常修炼，生产岗位半速兼修；演武场提供额外修炼加成，最多99人。</p>`;
   },
   assign(bId) {
     const sel = document.getElementById("assign-sel-" + bId);
@@ -399,7 +404,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
           return sec && !sec.destroyed ? sec.name : null;
         }).filter(Boolean).join("、") || "（成员已尽数覆灭）"}</p>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn small" onclick="UI.openCouncil()">召开议事</button>
+          <button class="btn small" ${al.lastCouncilMonth === Game.monthKey() ? "disabled" : ""} onclick="UI.openCouncil()">召开议事（每月一次）</button>
           <button class="btn small danger" ${al.raidCd > 0 ? "disabled" : ""} onclick="UI.doRaid()">讨伐魔道${al.raidCd > 0 ? `（冷却${al.raidCd}月）` : ""}</button>
         </div>
         <p class="scroll-hint">讨伐魔道：我方总战力 + 盟员半数战力 vs 魔道（逐年变强，当前约 ${ALLIANCE_CFG.modaoBase + s.year * 30}）。</p>`
@@ -407,7 +412,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
          <button class="btn primary" onclick="UI.formAlliance()">组建联盟</button>`}
     </div>`;
     el.innerHTML = `<div class="grid cols-2">${cards}</div>${alliancePanel}
-      <p class="scroll-hint">我方总战力：${Game.sectPower()}。关系≤${WAR_CONFIG.assaultNeedRel} 可发动宗门攻防战（编队+战术+战后三选一处置）。</p>`;
+      <p class="scroll-hint">我方总战力：${Game.sectPower()}。关系≤${WAR_CONFIG.assaultNeedRel} 可发动宗门攻防战。每个宗门每月只能交战一次，宣战与攻打山门共用次数；讲学每宗每月一次。</p>`;
   },
   formAlliance() {
     this.confirm("牵头组建联盟？需消耗各方人情，成立后我宗为盟主，每月可召开议事、发动联盟讨伐。", () => {
@@ -455,13 +460,16 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
 
   // ---------- 战争指挥室 ----------
   showWarRoom(sectId) {
-    this.warBgm();
     const s = Game.state;
     const sec = s.sects.find(x => x.id === sectId);
+    const err = Game.warError(sec);
+    if (err) return this.toast(err);
+    this.warBgm();
     const formation = { front: [], mid: [], back: [] };
-    let tactic = "frontal";
-    const available = Game.aliveDisciples().filter(d => d.injuredMonths <= 0 && !d.adventure);
+    const tactic = "frontal";
+    const available = Game.aliveDisciples().filter(d => Game.available(d));
     const render = () => {
+      const { tactic } = this._warState;
       const inFormation = new Set([...formation.front, ...formation.mid, ...formation.back]);
       const pool = available.filter(d => !inFormation.has(d.id));
       const atk = Game.calcAssaultPower(formation);
@@ -479,11 +487,8 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
             }).join("") || "<span style='color:var(--text-dim)'>空缺</span>"}
           </div>`).join("")}
         </div>
-        <div class="modal-text">可派遣弟子（点击加入 前/中/后排）：<br>
-          ${pool.map(d => `<span class="tag" style="cursor:default">${d.name}（${CLASSES[d.cls].name}·战力${Game.disciplePower(d)}）</span>
-            <a href="javascript:;" onclick="UI._warAdd('${sectId}','front',${d.id})">前</a>
-            <a href="javascript:;" onclick="UI._warAdd('${sectId}','mid',${d.id})">中</a>
-            <a href="javascript:;" onclick="UI._warAdd('${sectId}','back',${d.id})">后</a>`).join("<br>") || "无人可派"}</div>
+        <div class="modal-text">可派遣弟子（点击加入 前/中/后排）：</div>
+        <div>${pool.map(d => `<div class="war-candidate"><span class="tag">${d.name}（${CLASSES[d.cls].name}·战力${Game.disciplePower(d)}）</span>${["front", "mid", "back"].map(row => `<button class="btn small" onclick="UI._warAdd('${sectId}','${row}',${d.id})">${{front:"前",mid:"中",back:"后"}[row]}</button>`).join("")}</div>`).join("") || "无人可派"}</div>
         <img class="divider-img" src="assets/ui_divider.png">
         <div class="modal-text">战术选择：</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -504,6 +509,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   _warAdd(sectId, row, dId) {
     const f = this._warState.formation;
     if (f[row].length >= 5) return this.toast("每排最多 5 人");
+    if (Object.values(f).some(ids => ids.includes(dId))) return;
     f[row].push(dId);
     this._warState.render();
   },
@@ -517,27 +523,34 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     this._warState.render();
   },
   _warGo(sectId) {
+    if (!this._warState) return;
     const { formation, tactic } = this._warState;
     const r = Game.startAssault(sectId, formation, tactic);
     if (r.err) return this.toast(r.err);
+    this._warState = null;
+    Game.autosave();
     this.sfx("battle_result");
     if (r.win && r.needPostWar) {
-      this.modal(`<div class="sprite sprite-sword-clash"></div><h2>大捷！</h2><div class="modal-text">${r.msg}</div>
-        <div class="modal-options">
-          <button class="btn opt-btn danger" onclick="UI._postWar('${sectId}','destroy')">灭门掠夺<span class="opt-desc">掠其库藏、概率俘虏弟子；声望大跌，各宗警惕</span></button>
-          <button class="btn opt-btn" onclick="UI._postWar('${sectId}','vassal')">收为附庸<span class="opt-desc">保留其建制，年年岁贡；需维护忠诚度防反叛</span></button>
-          <button class="btn opt-btn" onclick="UI._postWar('${sectId}','merge')">合并入宗<span class="opt-desc">其弟子并入我宗，携「异心」debuff，需时间消化</span></button>
-        </div>`);
-      document.getElementById("modal").classList.add("war-result");
+      this._showPostWar(sectId, r.msg);
     } else {
       this.modal(`<div class="sprite sprite-sword-clash"></div><h2>败北……</h2><div class="modal-text">${r.msg}</div>
         <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render()">收兵回山</button></div>`);
       document.getElementById("modal").classList.add("war-result");
     }
   },
+  _showPostWar(sectId, msg) {
+      this.modal(`<div class="sprite sprite-sword-clash"></div><h2>大捷！</h2><div class="modal-text">${msg}</div>
+        <div class="modal-options">
+          <button class="btn opt-btn danger" onclick="UI._postWar('${sectId}','destroy')">灭门掠夺<span class="opt-desc">掠其库藏、概率俘虏弟子；声望大跌，各宗警惕</span></button>
+          <button class="btn opt-btn" onclick="UI._postWar('${sectId}','vassal')">收为附庸<span class="opt-desc">保留其建制，年年岁贡；需维护忠诚度防反叛</span></button>
+          <button class="btn opt-btn" onclick="UI._postWar('${sectId}','merge')">合并入宗<span class="opt-desc">其弟子并入我宗，携「异心」debuff，需时间消化</span></button>
+        </div>`);
+      document.getElementById("modal").classList.add("war-result");
+  },
   _postWar(sectId, choice) {
     const r = Game.postWar(sectId, choice);
     if (r.err) return this.toast(r.err);
+    Game.autosave();
     this.modal(`<h2>战后处置</h2><div class="modal-text">${r.msg}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render()">知道了</button></div>`);
     document.getElementById("modal").classList.add("war-result");
@@ -570,7 +583,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         <div class="panel">
           <h3>客卿挂单</h3>
           <p style="color:var(--text-dim)">${KEQING.desc}</p>
-          ${keqings.map(d => `<p>${d.name}（${REALMS[d.realm].name}期·月俸${KEQING.salaryBase[d.realm]}灵石·忠诚${d.loyalty}）</p>`).join("") || "<p style='color:var(--text-dim)'>暂无客卿。</p>"}
+          ${keqings.map(d => `<p>${d.name}（${REALMS[d.realm].name}期·月俸${KEQING.salaryBase[d.realm] ?? 10}灵石·忠诚${d.loyalty}）</p>`).join("") || "<p style='color:var(--text-dim)'>暂无客卿。</p>"}
           <button class="btn primary" style="margin-top:8px" onclick="UI.recruitKeqing()">招募客卿（灵石×500）</button>
         </div>
       </div>
@@ -612,13 +625,16 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const chk = Game.canDujie(d);
     if (chk.err) return this.toast(chk.err);
     this.dujieBgm();
-    let pills = 0, guardians = [], wave = 0, done = false;
+    let pills = d.tribulation ? d.tribulation.pills : 0;
+    let guardians = d.tribulation ? d.tribulation.guardians.slice() : [];
+    let wave = d.tribulation ? d.tribulation.wave : 0, done = false;
     const render = () => {
       const rate = Game.dujieWaveRate(pills, guardians.length);
-      const elders = Game.aliveDisciples().filter(x => x.id !== d.id && x.realm >= 6 && x.injuredMonths <= 0);
+      const elders = Game.aliveDisciples().filter(x => Game.canGuard(d, x, 6));
       const wavesHtml = Array.from({ length: DUJIE.waves }, (_, i) => {
         const n = i + 1;
-        const cls = this._dujieResult ? (this._dujieResult[i] === 1 ? "pass" : "fail") : (n === wave + 1 && !done ? "now" : "");
+        const result = this._dujieResult[i];
+        const cls = result === 1 ? "pass" : result === -1 ? "fail" : (n === wave + 1 && !done ? "now" : "");
         return `<div class="dujie-wave ${cls || ""}">${n}</div>`;
       }).join("");
       this.modal(`
@@ -644,7 +660,8 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     this._dujieState = { dId, get pills() { return pills; }, get guardians() { return guardians; }, get wave() { return wave; },
       setPills: v => pills = v, toggleGuard: id => { const i = guardians.indexOf(id); i >= 0 ? guardians.splice(i, 1) : guardians.length < DUJIE.maxGuardian && guardians.push(id); },
       nextWave: () => ++wave, setDone: () => done = true, render };
-    this._dujieResult = [];
+    this._dujieResult = Array(wave).fill(1);
+    this._dujieFinal = null;
     render();
   },
   _djPill(delta) {
@@ -656,6 +673,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   _djGuard(id) { const st = this._dujieState; st.toggleGuard(id); st.render(); },
   _djWave() {
     const st = this._dujieState;
+    if (!st || this._dujieFinal) return;
     const nextWave = st.wave + 1;
     this.sfx("dujie");
     const r = Game.dujieWave(st.dId, nextWave, st.pills, st.guardians);
@@ -693,7 +711,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       return;
     }
     if (!s.branch) {
-      const can = Game.aliveDisciples().filter(d => d.realm >= SPIRIT_BRANCH.minRealm && !d.isLeader && d.injuredMonths <= 0 && !d.adventure);
+      const can = Game.aliveDisciples().filter(d => d.realm >= SPIRIT_BRANCH.minRealm && !d.isLeader && Game.available(d));
       el.innerHTML = `<div class="panel"><h3>建立灵界分宗</h3>
         <p>消耗：灵石×2000、灵药×200、矿石×200；至少派驻 ${SPIRIT_BRANCH.minDisciple} 名金丹期以上弟子（掌门留守）。</p>
         <div class="modal-options" style="margin-top:8px">
@@ -724,7 +742,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
             <button class="btn small" onclick="UI.spiritDiplo('${sec.id}','gift')">赠礼(300)</button>
             <button class="btn small" onclick="UI.spiritDiplo('${sec.id}','trade')">跨界贸易</button></p>`;
         }).join("")}
-        <p class="scroll-hint">关系 &lt;-30 的灵界势力可能袭扰分宗；关系 ≥20 可进行跨界贸易。</p>
+        <p class="scroll-hint">关系 &lt;-30 的灵界势力可能袭扰分宗；关系 ≥20 可进行跨界贸易，每宗每月一次。</p>
       </div>`;
   },
   establishBranch() {
@@ -750,7 +768,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const s = Game.state;
     const el = document.getElementById("view-trade");
     const active = s.caravans[0];
-    const idle = Game.aliveDisciples().filter(d => d.injuredMonths <= 0 && !d.adventure);
+    const idle = Game.aliveDisciples().filter(d => Game.available(d) && !Game.hasJob(d));
     el.innerHTML = `
       ${active ? `<div class="panel"><h3>商队在外</h3>
         <p>路线：${TRADE_ROUTES.find(r => r.id === active.routeId).name}｜货物：${TRADE_GOODS[active.goodsId].name}×${active.amount}｜归期：${active.monthsLeft} 个月</p></div>` : ""}
@@ -763,7 +781,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
           <p>可贩商品：${r.goods.map(g => TRADE_GOODS[g].name).join("、")}</p>
           <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
             <select id="trade-goods-${r.id}" style="background:var(--panel-light);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px">
-              ${r.goods.map(g => `<option value="${g}">${TRADE_GOODS[g].name}（单价${TRADE_GOODS[g].unitCost}灵石，库存${s.resources[g] || 0}）</option>`).join("")}
+              ${r.goods.map(g => `<option value="${g}">${TRADE_GOODS[g].name}（采购价${TRADE_GOODS[g].unitCost}灵石）</option>`).join("")}
             </select>
             <select id="trade-escort-${r.id}" style="background:var(--panel-light);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px">
               <option value="">无护送（风险高）</option>
@@ -773,7 +791,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
           </div>
         </div>`).join("")}
       </div>
-      <p class="scroll-hint">货款 = 单价 × 数量，从灵石扣除；归来进行风险结算：被劫则血本无归且护送弟子重伤；护送弟子战力越高风险越低。同时仅能有一支商队在外。</p>`;
+      <p class="scroll-hint">商队以灵石采购货物，货款 = 单价 × 数量；成功归来返还货款并获得利润，被劫则损失货款且护送弟子重伤。护送期间暂停修炼与任职。同时仅能有一支商队在外。</p>`;
   },
   dispatch(routeId) {
     const goods = document.getElementById("trade-goods-" + routeId).value;
@@ -791,7 +809,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const s = Game.state;
     const el = document.getElementById("view-adventure");
     const out = Game.aliveDisciples().filter(d => d.adventure);
-    const can = Game.aliveDisciples().filter(d => !d.adventure && d.injuredMonths <= 0 && !Game.hasJob(d));
+    const can = Game.aliveDisciples().filter(d => Game.available(d) && !Game.hasJob(d));
     el.innerHTML = `
       ${out.length ? `<div class="panel"><h3>历练在外</h3>
         ${out.map(d => `<p>${this.avatar(d)}${d.name} —— ${ADVENTURE_PLACES.find(p => p.id === d.adventure.placeId).name}，${d.adventure.monthsLeft} 个月后归来</p>`).join("")}</div>` : ""}
@@ -890,21 +908,20 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     if (s.gameOver) return this.toast("宗门已覆灭，请读档或重开。");
     this.sfx("month");
     const r = Game.nextMonth();
+    if (r.err) { this._drainQueue(); return this.toast(r.err); }
     this.render();
-    this._msgQueue = [];
-    // 派系内斗事件（优先裁决）
-    if (r.factionEvt) this._msgQueue.push({ type: "faction", ev: r.factionEvt });
-    // 全界大事件
-    if (r.worldEvt) this._msgQueue.push({ type: "world", ev: r.worldEvt });
-    // 历练归来事件优先
-    (r.advReturns || []).forEach(({ d, ev }) => this._msgQueue.push({ type: "adv", d, ev }));
-    if (r.event) this._msgQueue.push({ type: "event", ev: r.event });
-    if (r.msgs && r.msgs.length) this._msgQueue.push({ type: "msgs", list: r.msgs });
     this._drainQueue();
   },
   _drainQueue() {
-    const item = (this._msgQueue || []).shift();
-    if (!item) return;
+    this._pendingWorld = this._pendingAdv = this._pendingEvent = null;
+    const item = (Game.state.pendingEvents || [])[0];
+    if (!item) {
+      const broken = Game.state.sects.find(sec => sec.broken);
+      if (broken) return this._showPostWar(broken.id, `请完成对【${broken.name}】的战后处置。`);
+      const d = Game.aliveDisciples().find(x => x.tribulation);
+      if (d) return this.showDujie(d.id);
+      return;
+    }
     if (item.type === "world") {
       const ev = item.ev;
       this.sfx("event");
@@ -928,9 +945,11 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
             ${o.label}<span class="opt-desc">${o.desc}</span></button>`).join("")}
         </div>`);
     } else if (item.type === "adv") {
-      const { d, ev } = item;
+      const { ev } = item;
+      const d = Game.state.disciples.find(x => x.id === item.dId);
+      if (!d || !d.alive) { Game.completePendingEvent(); return this._drainQueue(); }
       this.sfx("event");
-      this._pendingAdv = item;
+      this._pendingAdv = { d, ev };
       this.modal(`
         <h2>【历练归来】${d.name} · ${ev.title}</h2>
         <div class="modal-text">${ev.text.replaceAll("{name}", d.name)}</div>
@@ -943,29 +962,35 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       this.showEvent(item.ev, null);
     } else {
       this.modal(`<h2>本月要事</h2><div class="modal-text">${item.list.join("\n")}</div>
-        <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI._drainQueue()">知道了</button></div>`);
+        <div class="modal-footer"><button class="btn primary" onclick="Game.completePendingEvent();UI.closeModal();UI._drainQueue()">知道了</button></div>`);
     }
   },
   chooseWorld(optIdx) {
-    const r = Game.applyWorldEvent(this._pendingWorld, optIdx);
+    const ev = this._pendingWorld;
+    if (!ev) return;
+    const r = Game.applyWorldEvent(ev, optIdx);
     if (r.err) return this.toast(r.err);
-    Game.autosave();
-    this.modal(`<h2>【${this._pendingWorld.title}】结果</h2><div class="modal-text">${r.msg}</div>
+    this._pendingWorld = null;
+    Game.completePendingEvent();
+    this.modal(`<h2>【${ev.title}】结果</h2><div class="modal-text">${r.msg}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render();UI._drainQueue()">继续</button></div>`);
     document.getElementById("modal").classList.add("event-mijing");
   },
   chooseFaction(optIdx) {
+    if (!Game.state.pendingEvents.length || Game.state.pendingEvents[0].type !== "faction") return;
     const r = Game.applyFactionChoice(optIdx);
     if (r.err) return this.toast(r.err);
-    Game.autosave();
+    Game.completePendingEvent();
     this.modal(`<h2>【内斗裁决】</h2><div class="modal-text">${r.msg}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render();UI._drainQueue()">继续</button></div>`);
   },
   chooseAdv(optIdx) {
+    if (!this._pendingAdv) return;
     const { d, ev } = this._pendingAdv;
     const r = Game.applyAdvOption(d, ev, optIdx);
     if (r.err) return this.toast(r.err);
-    Game.autosave();
+    this._pendingAdv = null;
+    Game.completePendingEvent();
     this.modal(`<h2>【历练·${ev.title}】结果</h2><div class="modal-text">${r.msg}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render();UI._drainQueue()">继续</button></div>`);
     document.getElementById("modal").classList.add("event-mijing");
@@ -986,9 +1011,11 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   },
   chooseEvent(evId, optIdx) {
     const ev = this._pendingEvent;
+    if (!ev || ev.id !== evId) return;
     const r = Game.applyEventOption(ev, optIdx);
     if (r.err) return this.toast(r.err);
-    Game.autosave();
+    this._pendingEvent = null;
+    Game.completePendingEvent();
     this.modal(`<h2>【${ev.title}】结果</h2><div class="modal-text">${r.msg}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render();UI._drainQueue()">继续</button></div>`);
     document.getElementById("modal").classList.add("event-mijing");
@@ -1010,14 +1037,14 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       <div class="modal-footer"><button class="btn" onclick="UI.closeModal()">取消</button></div>`);
   },
   doSave(slot) {
-    Game.save(slot);
-    this.toast(`已保存至档位 ${slot}`);
+    if (!Game.save(slot)) return this.toast("存档失败，请检查本地存储空间或权限");
     this.closeModal();
+    this.toast(`已保存至档位 ${slot}`);
   },
   doLoad(slot) {
     this.confirm("读取存档将覆盖当前进度，确定？", () => {
-      if (Game.load(slot)) { this.toast("读档成功"); this.closeModal(); this.render(); }
-      else this.toast("该档位为空");
+      if (Game.load(slot)) { this.closeModal(); this.render(); this._drainQueue(); }
+      else this.toast("该档位为空或存档已损坏，当前进度未改变");
     });
   },
   doReset() {
@@ -1032,6 +1059,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
 
   // ---------- 通用组件 ----------
   modal(html) {
+    document.getElementById("modal").classList.remove("war-result", "event-mijing", "event-alliance", "event-spirit", "event-dujie");
     // v1.1.1：移除弹窗内印章（曾遮挡选项文字），印章固定于主界面 HUD
     document.getElementById("modal").innerHTML = html;
     document.getElementById("modal-mask").classList.remove("hidden");
@@ -1062,10 +1090,19 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   },
   _confirmYes() {
     const cb = this._confirmCb;
+    this._confirmCb = null;
     this.closeModal();
     if (cb) cb();
   },
   toast(msg) {
+    // 错误提示保留原对话框，玩家仍可修改准备或重新选择事件。
+    if (!document.getElementById("modal-mask").classList.contains("hidden")) {
+      const m = document.getElementById("modal");
+      let hint = m.querySelector(".modal-hint");
+      if (!hint) { hint = document.createElement("p"); hint.className = "modal-hint"; hint.style.color = "#d05a4e"; m.appendChild(hint); }
+      hint.textContent = msg;
+      return;
+    }
     this.modal(`<h2>提示</h2><div class="modal-text">${msg}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal()">知道了</button></div>`);
   }

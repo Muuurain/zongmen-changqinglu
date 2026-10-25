@@ -265,7 +265,7 @@ const EVENTS = [
     text: "轰的一声巨响！丹房炉火失控，浓烟滚滚，驻守丹修灰头土脸地逃了出来。",
     weight: 5, bad: true, needBuilding: "danfang",
     options: [
-      { label: "修缮丹炉", desc: "灵石 -60，丹房本月停产", effect: { res: { lingshi: -60 } } },
+      { label: "修缮丹炉", desc: "灵石 -60，丹房下月停产", effect: { res: { lingshi: -60 }, haltDanfang: true } },
       { label: "责罚丹修", desc: "驻守丹修忠诚 -15，灵药损失 -10", effect: { res: { lingyao: -10 }, punishDan: true } }
     ]
   },

@@ -39,14 +39,13 @@ fse.ensureDirSync(APP_DIR);
 for (const f of ['main.js', 'package.json', 'index.html']) {
   fse.copySync(path.join(ROOT, f), path.join(APP_DIR, f));
 }
-for (const d of ['css', 'js', 'assets']) {
+for (const d of ['css', 'js', 'assets', 'build']) {
   fse.copySync(path.join(ROOT, d), path.join(APP_DIR, d));
 }
 
 console.log('4/4 压缩为 zip 分发包...');
 execFileSync(sevenZip, ['a', '-tzip', '-mx=5', '-y', ZIP_PATH, OUT_DIR], { stdio: 'ignore' });
 
-const sizeDir = fse.statSync(OUT_DIR).size;
 const sizeZip = fse.statSync(ZIP_PATH).size;
 console.log(`\n打包完成！`);
 console.log(`  目录：${OUT_DIR}`);
