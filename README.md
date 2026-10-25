@@ -2,7 +2,20 @@
 
 > 传统古典仙侠背景的宗门经营模拟游戏。融合「弟子深度养成 + 宗门道统传承」的内部经营线，与「外交贸易 + 征伐收服」的外部博弈线，形成内外双循环闭环。**非挂机设计**——一切成长由玩家决策驱动。
 
-![平台](https://img.shields.io/badge/平台-Windows%20%7C%20浏览器-blue) ![引擎](https://img.shields.io/badge/引擎-Electron%2033%20%7C%20原生JS-orange) ![版本](https://img.shields.io/badge/版本-v1.0.0-green)
+![平台](https://img.shields.io/badge/平台-Windows%20%7C%20浏览器-blue) ![引擎](https://img.shields.io/badge/引擎-Electron%2033%20%7C%20原生JS-orange) ![版本](https://img.shields.io/badge/版本-v1.1.0-green)
+
+## 当前版本：v1.1.0「画面焕新」（2026-10-25）
+
+响应玩家反馈「文字过多、图像与动画过少」，全方面视觉与听觉体验升级：
+
+- **顶栏焕新**：水墨横幅底纹 + 祥云循环流动动画，5 种资源（灵石/灵药/矿石/木材/丹药）配专属图标
+- **事件插画**：历练地点、商路路线、通用事件（遗迹/妖兽/来客）、突破、飞升共 11 张场景插画，事件弹窗按类型自动配图；弹窗右下角朱红印章装饰
+- **帧动画**：突破光环、渡劫天雷劈落、战争剑斗交锋、弟子修炼灵光循环、资源光点飘散（CSS steps 帧动画）
+- **人物立绘**：弟子头像扩至 4 变体；长老院四类职业立绘；外交界面 4 宗 NPC 宗主头像；招募结果带头像展示
+- **音频扩充**：渡劫专属 BGM（关弹窗自动复位）；按钮点击 / 闭关一月 / 境界提升 / 商队出发 / 温和失败 5 个新音效
+- **自定义图标**：应用图标替换默认 Electron 图标（窗口 + 安装包）
+
+历史版本与详细进度见 [docs/progress.md](docs/progress.md)。
 
 ## 游戏特色
 
@@ -17,13 +30,16 @@
 
 ## 运行方式
 
-### 方式一：Windows 便携版（推荐）
+### 方式一：Windows 安装包（推荐）
+从 [Releases](../../releases) 下载最新版 `ZongMenChangQingLu-Setup-x.x.x.exe`（NSIS 安装包），安装后运行。
+
+### 方式二：Windows 便携版
 从 [Releases](../../releases) 下载 `宗门长青录-win32-x64.zip`，解压后双击 `宗门长青录.exe`。
 
-### 方式二：浏览器直接游玩
+### 方式三：浏览器直接游玩
 双击打开 `index.html` 即可（存档保存在浏览器 localStorage）。
 
-### 方式三：从源码运行
+### 方式四：从源码运行
 ```bash
 npm install
 npm start
@@ -35,7 +51,7 @@ npm start
 # 便携版（无需管理员权限）
 npm run build:portable
 
-# NSIS 安装包（需开发者模式或管理员终端，因符号链接权限）
+# NSIS 安装包（若报符号链接权限错误，改用管理员终端运行）
 npm run dist
 ```
 
@@ -44,13 +60,14 @@ npm run dist
 ```
 ├── index.html          # 入口页面
 ├── main.js             # Electron 主进程
-├── css/style.css       # 国风水墨 UI
+├── css/style.css       # 国风水墨 UI（含 v1.1.0 帧动画样式）
 ├── js/
 │   ├── data.js         # 配置表（境界/建筑/事件/势力，数据驱动可扩展）
 │   ├── game.js         # 核心逻辑（月度结算/战争/贸易/渡劫等）
-│   └── ui.js           # 界面渲染与交互
-├── assets/             # 美术与音频资源（AI 生成）
-├── docs/               # 资源清单与提示词文档
+│   └── ui.js           # 界面渲染与交互（含资源映射与动效接入）
+├── assets/             # 美术与音频资源（AI 生成，v1.1.0 起按 avatar/portrait/ill/anim/icon/ui/audio 分目录）
+├── build/app_icon.png  # 应用图标
+├── docs/               # PRD / architecture / progress / 资源清单
 └── scripts/            # 打包脚本
 ```
 
