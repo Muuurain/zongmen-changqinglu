@@ -26,6 +26,10 @@ const UI = {
     // 首次交互自动播放（规避浏览器自动播放限制）
     const kick = () => { bgm.play().catch(() => {}); document.removeEventListener("click", kick); };
     document.addEventListener("click", kick);
+    // v1.1.0：按钮统一点击音效
+    document.addEventListener("click", e => {
+      if (e.target.closest(".btn") && !e.target.closest(".btn:disabled")) this.sfx("click");
+    });
     this.render();
   },
 
@@ -49,7 +53,7 @@ const UI = {
     document.getElementById("sect-rep").textContent = `声望：${s.reputation}`;
     const bar = document.getElementById("resource-bar");
     bar.innerHTML = Object.entries(RESOURCES).map(([k, r]) =>
-      `<span class="res-item"><span class="res-name">${r.icon}${r.name}</span><span class="res-val">${s.resources[k] || 0}</span></span>`
+      `<span class="res-item"><img class="res-icon" src="assets/icon/icon_res_${k}.png" alt="" onerror="this.style.display='none'"><span class="res-name">${r.name}</span><span class="res-val">${s.resources[k] || 0}</span></span>`
     ).join("");
     document.getElementById("nav-disciple-count").textContent =
       `(${Game.aliveDisciples().length}/${Game.capacity()})`;
@@ -71,18 +75,52 @@ const UI = {
     map[this.currentView]();
   },
 
-  // 音效
+  // 音效（v1.1.0 新增音效位于 assets/audio/，旧音效仍在 assets/ 根目录）
   sfx(name) {
     try {
-      const a = new Audio(`assets/sfx_${name}.mp3`);
+      const EXTRA = {
+        click: "assets/audio/sfx_click.mp3",
+        month: "assets/audio/sfx_month.mp3",
+        realm_up: "assets/audio/sfx_realm_up.mp3",
+        trade: "assets/audio/sfx_trade.mp3",
+        fail_soft: "assets/audio/sfx_fail_soft.mp3",
+      };
+      const a = new Audio(EXTRA[name] || `assets/sfx_${name}.mp3`);
       a.volume = 0.6;
       a.play().catch(() => {});
     } catch (e) {}
   },
-  // 弟子头像：按性别+id 稳定取图
+  // 弟子头像：按性别+id 稳定取图（v1.1.0 扩至 4 变体；1-2 在根目录，3-4 在 avatar/ 子目录）
   avatar(d, cls) {
-    const file = (d.gender === "男" ? "avatar_m" : "avatar_f") + ((d.id % 2) + 1);
-    return `<img class="avatar ${cls || ""}" src="assets/${file}.png" alt="">`;
+    const n = (d.id % 4) + 1;
+    const file = (d.gender === "男" ? "avatar_m" : "avatar_f") + n;
+    const path = n <= 2 ? `assets/${file}.png` : `assets/avatar/${file}.png`;
+    return `<img class="avatar ${cls || ""}" src="${path}" alt="">`;
+  },
+  // 弟子头像路径（供招募结果等直接取地址）
+  avatarPath(d) {
+    const n = (d.id % 4) + 1;
+    const file = (d.gender === "男" ? "avatar_m" : "avatar_f") + n;
+    return n <= 2 ? `assets/${file}.png` : `assets/avatar/${file}.png`;
+  },
+  // NPC 宗主头像映射（按宗门气质对应立绘）
+  npcPortrait(secId) {
+    const map = { tieyang: "portrait_npc_chiyun", hanjian: "portrait_npc_xuanjian", baihua: "portrait_npc_biluo", qingzhu: "portrait_npc_lingxiao" };
+    return map[secId] ? `assets/portrait/${map[secId]}.png` : null;
+  },
+  // 长老立绘映射（按职业领域）
+  elderPortrait(cls) {
+    const map = { dan: "portrait_elder_alchemist", qi: "portrait_elder_forge", fu: "portrait_elder_forge",
+      sword: "portrait_elder_discipline", spell: "portrait_elder_discipline", body: "portrait_elder_discipline", array: "portrait_elder_discipline",
+      envoy: "portrait_elder_scholar", preach: "portrait_elder_scholar" };
+    return map[cls] ? `assets/portrait/${map[cls]}.png` : null;
+  },
+  // 事件插画映射（按事件 id 归类）
+  eventIll(evId) {
+    if (/mijing|legacy|ruins|dunwu/.test(evId)) return "assets/ill/ill_event_ruins.png";
+    if (/xieyue|shouchao|beast/.test(evId)) return "assets/ill/ill_event_beast.png";
+    if (/laifang|qiushi|shangdui|xinmo|tianjiao|sidu|zhalu|lingmai/.test(evId)) return "assets/ill/ill_event_guest.png";
+    return null;
   },
 
   // ---------- 宗门总览 ----------
@@ -177,7 +215,7 @@ const UI = {
     if (!d) return;
     this.modal(`
       <h2>${d.name} ${d.isLeader ? "（掌门）" : ""}</h2>
-      ${this.avatar(d, "big")}
+      <span class="avatar-wrap big">${this.avatar(d, "big")}<span class="sprite sprite-aura"></span></span>
       <div class="modal-text">
 性别：${d.gender}　年龄：${Math.floor(d.age)}　剩余寿元：${Math.floor(d.lifespanLeft)} 年
 境界：${REALMS[d.realm].name}${STAGES[d.stage]}
@@ -242,8 +280,11 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const r = Game.tryBreakthrough(id, pills, guardians);
     if (r.err) return this.toast(r.err);
     this.sfx(r.ok ? "breakthrough_success" : "breakthrough_fail");
+    if (r.ok) this.sfx("realm_up");
     const d = Game.state.disciples.find(x => x.id === id);
     this.modal(`
+      ${r.ok ? `<img class="modal-ill" src="assets/ill/ill_breakthrough.png" alt="">
+      <div class="sprite sprite-breakthrough"></div>` : ""}
       <h2>${r.ok ? "突破成功！" : "突破失败……"}</h2>
       <div class="modal-text">${r.ok
         ? (r.major ? `${d.name} 道基大成，成功踏入【${REALMS[d.realm].name}期】！天地灵气为之倒卷！` : `${d.name} 顺利突破至 ${REALMS[d.realm].name}${STAGES[d.stage]}。`)
@@ -317,10 +358,14 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       const pct = (sec.relation + 100) / 200 * 100;
       const color = sec.relation < 0 ? "#d05a4e" : sec.relation < 40 ? "#b8860b" : "#7fb069";
       const canAssault = sec.relation <= WAR_CONFIG.assaultNeedRel && !sec.vassal;
+      const npcImg = this.npcPortrait(sec.id);
       return `<div class="panel">
-        <h3>${sec.name} <span class="tag ${rel.cls}">${sec.atWar ? "交战中" : rel.name}</span>
+        <div class="npc-head">
+          ${npcImg ? `<img src="${npcImg}" alt="" onerror="this.style.display='none'">` : ""}
+          <h3 style="border:none;margin:0;padding:0">${sec.name} <span class="tag ${rel.cls}">${sec.atWar ? "交战中" : rel.name}</span>
           ${sec.allied ? `<span class="tag gold">同盟</span>` : ""}${sec.trade ? `<span class="tag green">通商</span>` : ""}
           ${sec.vassal ? `<span class="tag gold">附庸·忠诚${sec.loyalty}</span>` : ""}</h3>
+        </div>
         <p style="color:var(--text-dim)">${sec.trait}</p>
         <p>实力评估：${sec.power}　关系：${sec.relation}</p>
         <div class="rel-bar"><div style="width:${pct}%;background:${color}"></div></div>
@@ -469,7 +514,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     if (r.err) return this.toast(r.err);
     this.sfx("battle_result");
     if (r.win && r.needPostWar) {
-      this.modal(`<h2>大捷！</h2><div class="modal-text">${r.msg}</div>
+      this.modal(`<div class="sprite sprite-sword-clash"></div><h2>大捷！</h2><div class="modal-text">${r.msg}</div>
         <div class="modal-options">
           <button class="btn opt-btn danger" onclick="UI._postWar('${sectId}','destroy')">灭门掠夺<span class="opt-desc">掠其库藏、概率俘虏弟子；声望大跌，各宗警惕</span></button>
           <button class="btn opt-btn" onclick="UI._postWar('${sectId}','vassal')">收为附庸<span class="opt-desc">保留其建制，年年岁贡；需维护忠诚度防反叛</span></button>
@@ -477,7 +522,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         </div>`);
       document.getElementById("modal").classList.add("war-result");
     } else {
-      this.modal(`<h2>败北……</h2><div class="modal-text">${r.msg}</div>
+      this.modal(`<div class="sprite sprite-sword-clash"></div><h2>败北……</h2><div class="modal-text">${r.msg}</div>
         <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render()">收兵回山</button></div>`);
       document.getElementById("modal").classList.add("war-result");
     }
@@ -503,8 +548,12 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       <div class="grid cols-2">
         <div class="panel elder-hall">
           <h3>长老院（${elders.length}/${ELDER.maxSeats}）</h3>
-          ${elders.map(d => `<p>${this.avatar(d)}${d.name} —— ${ELDER.domainName[ELDER.seatDomain[d.cls]]} +${Math.round(ELDER.bonusPerSeat * 100)}%
-            <button class="btn small" onclick="UI.dismissElder(${d.id})">罢免</button></p>`).join("") || "<p style='color:var(--text-dim)'>虚位以待。</p>"}
+          ${elders.map(d => {
+            const ep = this.elderPortrait(d.cls);
+            return `<div class="elder-row">${ep ? `<img src="${ep}" alt="" onerror="this.style.display='none'">` : this.avatar(d)}
+            <span>${d.name} —— ${ELDER.domainName[ELDER.seatDomain[d.cls]]} +${Math.round(ELDER.bonusPerSeat * 100)}%</span>
+            <button class="btn small" onclick="UI.dismissElder(${d.id})">罢免</button></div>`;
+          }).join("") || "<p style='color:var(--text-dim)'>虚位以待。</p>"}
           ${candidates.length ? `<hr style="border-color:var(--border);margin:8px 0">
             <p style="color:var(--text-dim)">可任命（需${REALMS[ELDER.needRealm].name}期以上）：</p>
             ${candidates.map(d => `<p>${d.name}（${REALMS[d.realm].name}·${CLASSES[d.cls].name}）
@@ -554,6 +603,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const d = s.disciples.find(x => x.id === dId);
     const chk = Game.canDujie(d);
     if (chk.err) return this.toast(chk.err);
+    this.dujieBgm();
     let pills = 0, guardians = [], wave = 0, done = false;
     const render = () => {
       const rate = Game.dujieWaveRate(pills, guardians.length);
@@ -564,11 +614,13 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         return `<div class="dujie-wave ${cls || ""}">${n}</div>`;
       }).join("");
       this.modal(`
+        ${done && this._dujieFinal && this._dujieFinal.success ? `<img class="modal-ill" src="assets/ill/ill_ascend.png" alt="">` : ""}
         <h2>⚡ 九霄雷劫 —— ${d.name}</h2>
         <div class="modal-text">${done ? "" : `渡劫准备：渡劫丹 ${pills}/${Math.min(DUJIE.maxPill, s.resources.danyao)}（每颗 +2%）　护法 ${guardians.length}/${Math.min(DUJIE.maxGuardian, elders.length)} 名（每名 +1.5%）
 底蕴加成 +${Math.round((s.heritage || 0) * DUJIE.heritageWaveBonus * 100)}%　气运加成 +${Math.round(Game.qiyunBonus() * 100)}%
 <b style="color:var(--gold)">每道天雷成功率：${Math.round(rate * 100)}%</b>（九雷全过则飞升，失败：重伤掉境 50% / 道基崩损 30% / 形神俱灭 20%）`}</div>
         <div class="dujie-waves">${wavesHtml}</div>
+        ${wave > 0 && !done ? `<div class="sprite sprite-dujie-bolt"></div>` : ""}
         ${!done && wave === 0 ? `<div class="modal-options">
           <button class="btn opt-btn" onclick="UI._djPill(1)">渡劫丹 +1</button>
           <button class="btn opt-btn" onclick="UI._djPill(-1)">渡劫丹 -1</button>
@@ -604,10 +656,17 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     st.nextWave();
     if (r.finished) {
       st.setDone();
+      this._dujieFinal = r;
       Game.autosave();
+      if (r.success) this.sfx("realm_up");
     }
     st.render();
     this.toast2(r.msg, r.finished);
+  },
+  // 渡劫专属 BGM（与战争 BGM 同理，关弹窗时复位）
+  dujieBgm() {
+    const bgm = document.getElementById("bgm");
+    if (bgm && !bgm.dataset.dujieMode) { bgm.dataset.dujieMode = "1"; bgm.src = "assets/audio/bgm_dujie.mp3"; bgm.play().catch(() => {}); }
   },
   toast2(msg, final) {
     // 渡劫过程中的轻量提示：直接更新弹窗文本区顶部
@@ -688,7 +747,8 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       ${active ? `<div class="panel"><h3>商队在外</h3>
         <p>路线：${TRADE_ROUTES.find(r => r.id === active.routeId).name}｜货物：${TRADE_GOODS[active.goodsId].name}×${active.amount}｜归期：${active.monthsLeft} 个月</p></div>` : ""}
       <div class="grid cols-3">
-        ${TRADE_ROUTES.map(r => `<div class="panel">
+        ${TRADE_ROUTES.map((r, i) => `<div class="panel">
+          <img class="card-ill" src="assets/ill/ill_trade_r${i + 1}.png" alt="" onerror="this.style.display='none'">
           <h3>${r.name}</h3>
           <p style="color:var(--text-dim)">${r.desc}</p>
           <p>单程 ${r.months} 个月｜基础利润 ${r.profit}｜遇劫风险 <span style="color:${r.risk > 0.3 ? "#d05a4e" : "var(--gold)"}">${Math.round(r.risk * 100)}%</span></p>
@@ -712,7 +772,8 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const esc = document.getElementById("trade-escort-" + routeId).value;
     this.confirm(`确认派出商队走【${TRADE_ROUTES.find(r => r.id === routeId).name}】？\n货款将立即扣除，归期结算盈亏。`, () => {
       const r = Game.dispatchCaravan(routeId, goods, 10, esc ? Number(esc) : null);
-      if (r.err) this.toast(r.err);
+      if (r.err) { this.sfx("fail_soft"); this.toast(r.err); }
+      else this.sfx("trade");
       this.render();
     });
   },
@@ -727,7 +788,10 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       ${out.length ? `<div class="panel"><h3>历练在外</h3>
         ${out.map(d => `<p>${this.avatar(d)}${d.name} —— ${ADVENTURE_PLACES.find(p => p.id === d.adventure.placeId).name}，${d.adventure.monthsLeft} 个月后归来</p>`).join("")}</div>` : ""}
       <div class="grid cols-3">
-        ${ADVENTURE_PLACES.map(p => `<div class="panel">
+        ${ADVENTURE_PLACES.map(p => {
+          const advIll = { wild: "assets/ill/ill_adventure_lingchuan.png", town: "assets/ill/ill_adventure_haishi.png", ruins: "assets/ill/ill_adventure_moyuan.png" }[p.id];
+          return `<div class="panel">
+          <img class="card-ill" src="${advIll}" alt="" onerror="this.style.display='none'">
           <h3>${p.name}</h3>
           <p style="color:var(--text-dim)">${p.desc}</p>
           <p>历时 ${p.months} 个月｜危险度 <span style="color:${p.danger > 0.3 ? "#d05a4e" : "var(--gold)"}">${Math.round(p.danger * 100)}%</span></p>
@@ -737,7 +801,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
             </select>
             <button class="btn primary" ${can.length ? "" : "disabled"} onclick="UI.sendAdv('${p.id}')">派遣</button>
           </div>
-        </div>`).join("")}
+        </div>`;}).join("")}
       </div>
       <p class="scroll-hint">历练弟子须先解除岗位；归来时会触发随机事件，需你亲自抉择（影响修为/心性/气运/伤势）。</p>`;
   },
@@ -787,7 +851,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const r = Game.recruit(method);
     if (r.err) return this.toast(r.err);
     const list = r.list.map(d =>
-      `${d.name}（${SPIRIT_ROOTS[d.root].name}·${CLASSES[d.cls].name}·悟性${d.comprehension}·气运${d.luck}）`).join("\n");
+      `<img class="recruit-face" src="${this.avatarPath(d)}" alt="" onerror="this.style.display='none'">${d.name}（${SPIRIT_ROOTS[d.root].name}·${CLASSES[d.cls].name}·悟性${d.comprehension}·气运${d.luck}）`).join("\n");
     this.modal(`<h2>招募结果</h2><div class="modal-text">${list}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render()">收入门下</button></div>`);
   },
@@ -816,6 +880,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   onNextMonth() {
     const s = Game.state;
     if (s.gameOver) return this.toast("宗门已覆灭，请读档或重开。");
+    this.sfx("month");
     const r = Game.nextMonth();
     this.render();
     this._msgQueue = [];
@@ -900,7 +965,9 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   showEvent(ev, msgs) {
     this.sfx("event");
     this._pendingEvent = ev;
+    const ill = this.eventIll(ev.id);
     this.modal(`
+      ${ill ? `<img class="modal-ill" src="${ill}" alt="" onerror="this.style.display='none'">` : ""}
       <h2>【事件】${ev.title}</h2>
       <div class="modal-text">${(msgs && msgs.length ? msgs.join("\n") + "\n\n" : "")}${ev.text}</div>
       <div class="modal-options">
@@ -957,16 +1024,20 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
 
   // ---------- 通用组件 ----------
   modal(html) {
-    document.getElementById("modal").innerHTML = html;
+    const m = document.getElementById("modal");
+    m.innerHTML = html + `<img class="seal-stamp" src="assets/ui/ui_seal_stamp.png" alt="" onerror="this.remove()">`;
     document.getElementById("modal-mask").classList.remove("hidden");
   },
   closeModal() {
     const m = document.getElementById("modal");
     m.classList.remove("war-result", "event-mijing", "event-alliance", "event-spirit", "event-dujie");
     document.getElementById("modal-mask").classList.add("hidden");
-    // 战争 BGM 复位
+    // 战争/渡劫 BGM 复位
     const bgm = document.getElementById("bgm");
-    if (bgm && bgm.dataset.warMode) { bgm.src = "assets/bgm_main.mp3"; bgm.play().catch(() => {}); delete bgm.dataset.warMode; }
+    if (bgm && (bgm.dataset.warMode || bgm.dataset.dujieMode)) {
+      bgm.src = "assets/bgm_main.mp3"; bgm.play().catch(() => {});
+      delete bgm.dataset.warMode; delete bgm.dataset.dujieMode;
+    }
   },
   warBgm() {
     const bgm = document.getElementById("bgm");

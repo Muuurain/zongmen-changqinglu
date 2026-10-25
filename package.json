@@ -1,8 +1,8 @@
 {
   "name": "zongmen-changqinglu",
   "productName": "宗门长青录",
-  "version": "1.0.0",
-  "description": "传统仙侠宗门经营模拟游戏（四阶段完整版）",
+  "version": "1.1.0",
+  "description": "传统仙侠宗门经营模拟游戏（v1.1.0 画面焕新版）",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -14,9 +14,10 @@
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
   },
-  "build": {
-    "appId": "com.zongmen.changqinglu",
-    "productName": "宗门长青录",
+    "build": {
+      "appId": "com.zongmen.changqinglu",
+      "productName": "宗门长青录",
+      "icon": "build/app_icon.png",
     "directories": {
       "output": "dist"
     },
@@ -25,7 +26,8 @@
       "index.html",
       "css/**/*",
       "js/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "build/app_icon.png"
     ],
     "win": {
       "target": [

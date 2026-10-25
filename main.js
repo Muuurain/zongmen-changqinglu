@@ -11,6 +11,7 @@ function createWindow() {
     title: '宗门长青录',
     backgroundColor: '#1a1a2e',
     autoHideMenuBar: true,
+    icon: path.join(__dirname, 'build/app_icon.png'),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true

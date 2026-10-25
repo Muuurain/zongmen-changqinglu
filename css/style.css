@@ -202,3 +202,108 @@ tr:hover td { background: rgba(255,255,255,.03); }
 .war-row h4 { color: var(--gold); font-size: 13px; margin-bottom: 6px; }
 .war-row .tag { margin-bottom: 4px; cursor: pointer; }
 .tactic-btn { flex: 1; }
+
+/* ==================== v1.1.0 画面焕新 ==================== */
+
+/* 顶栏：横幅底纹 + 流动云纹 */
+#topbar {
+  position: relative;
+  background:
+    linear-gradient(rgba(26,29,43,.78), rgba(26,29,43,.85)),
+    url("../assets/ui/ui_banner_top.png") center/cover;
+  overflow: hidden;
+}
+#topbar::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: url("../assets/anim/anim_cloud_scroll.png") repeat-x left center;
+  background-size: auto 100%;
+  animation: cloudflow 24s steps(4) infinite;
+  opacity: .35;
+}
+@keyframes cloudflow { from { background-position-x: 0; } to { background-position-x: -3840px; } }
+#topbar > * { position: relative; z-index: 1; }
+
+/* 资源条图标 */
+.res-item .res-icon { width: 22px; height: 22px; vertical-align: middle; margin-right: 2px; }
+
+/* 面板宣纸底纹 */
+.panel {
+  background:
+    linear-gradient(rgba(30,33,48,.86), rgba(30,33,48,.9)),
+    url("../assets/ui/ui_panel_bg.png") center/cover;
+}
+
+/* 弹窗印章装饰 */
+.modal { position: relative; }
+.modal .seal-stamp {
+  position: absolute; right: 14px; bottom: 10px; width: 44px; height: 44px;
+  opacity: .8; pointer-events: none; transform: rotate(-8deg);
+}
+
+/* 弹窗顶部插画 */
+.modal-ill {
+  display: block; width: calc(100% + 48px); margin: -20px -24px 14px;
+  height: 190px; object-fit: cover;
+  border-bottom: 1px solid var(--gold);
+}
+
+/* 帧动画 sprite 通用 */
+.sprite { background-repeat: no-repeat; pointer-events: none; }
+.sprite-breakthrough {
+  width: 256px; height: 256px; margin: -30px auto -20px;
+  background-image: url("../assets/anim/anim_breakthrough.png");
+  animation: play8 1.2s steps(8) infinite;
+}
+@keyframes play8 { from { background-position-x: 0; } to { background-position-x: -2048px; } }
+.sprite-dujie-bolt {
+  width: 256px; height: 512px; margin: -60px auto -140px; transform: scale(.7);
+  background-image: url("../assets/anim/anim_dujie_bolt.png");
+  animation: playbolt 1s steps(8) infinite;
+}
+@keyframes playbolt { from { background-position-x: 0; } to { background-position-x: -2048px; } }
+.sprite-sword-clash {
+  width: 192px; height: 192px; margin: -10px auto;
+  background-image: url("../assets/anim/anim_sword_clash.png");
+  animation: play6 .9s steps(6) infinite;
+}
+@keyframes play6 { from { background-position-x: 0; } to { background-position-x: -1152px; } }
+.sprite-sparkle {
+  width: 96px; height: 96px; display: inline-block; vertical-align: middle;
+  background-image: url("../assets/anim/anim_sparkle.png");
+  animation: playspark 1s steps(6) infinite;
+}
+@keyframes playspark { from { background-position-x: 0; } to { background-position-x: -576px; } }
+.sprite-aura {
+  width: 128px; height: 128px; margin: -16px auto -10px;
+  background-image: url("../assets/anim/anim_aura_idle.png");
+  animation: playaura 1.6s steps(8) infinite;
+}
+@keyframes playaura { from { background-position-x: 0; } to { background-position-x: -1024px; } }
+
+/* 头像环绕修炼灵光 */
+.avatar-wrap { position: relative; display: inline-block; vertical-align: middle; }
+.avatar-wrap .sprite-aura {
+  position: absolute; inset: 50% auto auto 50%; transform: translate(-50%,-50%);
+  width: 56px; height: 56px; margin: 0; opacity: .55;
+}
+.avatar-wrap.big .sprite-aura { width: 150px; height: 150px; opacity: .7; }
+
+/* 弟子卡片式详情 */
+.disciple-card-head { text-align: center; margin-bottom: 10px; }
+
+/* 外交：NPC 宗主头像 */
+.npc-head { display: flex; align-items: center; gap: 10px; }
+.npc-head img { width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--gold); object-fit: cover; }
+
+/* 长老立绘 */
+.elder-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.elder-row img { width: 46px; height: 64px; object-fit: cover; border-radius: 4px; border: 1px solid var(--gold); }
+
+/* 商路/历练卡片插画头 */
+.card-ill { width: calc(100% + 28px); margin: -14px -14px 10px; height: 120px; object-fit: cover; border-radius: 6px 6px 0 0; border-bottom: 1px solid var(--border); }
+
+/* 招募结果头像行 */
+.recruit-face { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--gold); vertical-align: middle; margin-right: 8px; }
+
+/* 状态小图标 */
+.state-ico { width: 16px; height: 16px; vertical-align: -3px; margin-right: 2px; }
