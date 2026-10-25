@@ -1,13 +1,14 @@
 {
   "name": "zongmen-changqinglu",
   "productName": "宗门长青录",
-  "version": "0.1.0",
-  "description": "传统仙侠宗门经营模拟游戏（MVP：山门初立）",
+  "version": "1.0.0",
+  "description": "传统仙侠宗门经营模拟游戏（四阶段完整版）",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --win --x64",
-    "dist": "electron-builder --win nsis --x64"
+    "dist": "electron-builder --win nsis --x64",
+    "build:portable": "node scripts/build-portable.js"
   },
   "devDependencies": {
     "electron": "^33.0.0",
