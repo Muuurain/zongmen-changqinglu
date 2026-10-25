@@ -23,7 +23,7 @@
 响应玩家反馈「文字过多、图像与动画过少」，全方面视觉与听觉体验升级：
 
 - **顶栏焕新**：水墨横幅底纹 + 祥云循环流动动画，5 种资源（灵石/灵药/矿石/木材/丹药）配专属图标
-- **事件插画**：历练地点、商路路线、通用事件（遗迹/妖兽/来客）、突破、飞升共 11 张场景插画，事件弹窗按类型自动配图；弹窗右下角朱红印章装饰
+- **事件插画**：历练地点、商路路线、通用事件（遗迹/妖兽/来客）、突破、飞升共 11 张场景插画，事件弹窗按类型自动配图；朱红印章作为全局 HUD 固定于主界面右下角（v1.1.1 起不再置于弹窗内）
 - **帧动画**：突破光环、渡劫天雷劈落、战争剑斗交锋、弟子修炼灵光循环、资源光点飘散（CSS steps 帧动画）
 - **人物立绘**：弟子头像扩至 4 变体；长老院四类职业立绘；外交界面 4 宗 NPC 宗主头像；招募结果带头像展示
 - **音频扩充**：渡劫专属 BGM（关弹窗自动复位）；按钮点击 / 闭关一月 / 境界提升 / 商队出发 / 温和失败 5 个新音效
@@ -44,11 +44,17 @@
 
 ## 运行方式
 
-### 方式一：Windows 安装包（推荐）
-从 [Releases](../../releases) 下载最新版 `ZongMenChangQingLu-Setup-x.x.x.exe`（NSIS 安装包），安装后运行。当前最新为 [v1.1.2](../../releases/tag/v1.1.2)。
+### 方式一：下载 exe 安装程序（推荐）
+从 [Releases](../../releases) 下载最新版 `ZongMenChangQingLu-Setup-x.x.x.exe`（NSIS 安装程序），运行后按向导安装即可。当前最新为 [v1.1.2](../../releases/tag/v1.1.2)。Release 资产仅提供 exe 安装程序，不提供 zip 压缩包。
 
-### 方式二：Windows 便携版
-从 [Releases](../../releases) 下载 `宗门长青录-win32-x64.zip`，解压后双击 `宗门长青录.exe`。
+### 方式二：本地构建便携版
+便携版 zip（`宗门长青录-win32-x64.zip`，解压后双击 `宗门长青录.exe`）不由 Release 分发，需本地自行构建：
+
+```bash
+npm run build:portable
+```
+
+产物位于 `dist-portable/`，无需管理员权限。
 
 ### 方式三：浏览器直接游玩
 双击打开 `index.html` 即可（存档保存在浏览器 localStorage）。
@@ -62,10 +68,10 @@ npm start
 ## 打包
 
 ```bash
-# 便携版（无需管理员权限）
+# 便携版 zip（无需管理员权限），产物在 dist-portable/宗门长青录-win32-x64.zip
 npm run build:portable
 
-# NSIS 安装包（若报符号链接权限错误，改用管理员终端运行）
+# NSIS 安装程序（若报符号链接权限错误，改用管理员终端运行），产物在 dist/宗门长青录 Setup x.x.x.exe
 npm run dist
 ```
 
@@ -82,15 +88,16 @@ npm test
 ```
 ├── index.html          # 入口页面
 ├── main.js             # Electron 主进程
-├── css/style.css       # 国风水墨 UI（含 v1.1.0 帧动画样式）
+├── css/style.css       # 国风水墨 UI（v1.1.0 帧动画；v1.1.1 起全部 rem 化支持 DPI 自适应）
 ├── js/
 │   ├── data.js         # 配置表（境界/建筑/事件/势力，数据驱动可扩展）
-│   ├── game.js         # 核心逻辑（月度结算/战争/贸易/渡劫等）
-│   └── ui.js           # 界面渲染与交互（含资源映射与动效接入）
+│   ├── game.js         # 核心逻辑（月度结算/战争/贸易/渡劫等；存档结构版本 2）
+│   └── ui.js           # 界面渲染与交互（含资源映射、动效接入与 fitUI 自适应）
 ├── assets/             # 美术与音频资源（AI 生成，v1.1.0 起按 avatar/portrait/ill/anim/icon/ui/audio 分目录）
-├── build/app_icon.png  # 应用图标
+├── build/app_icon.png  # 应用图标（便携版与 NSIS 安装包共用）
 ├── docs/               # PRD / architecture / progress / 资源清单
-└── scripts/            # 打包脚本
+├── docx/               # 修复交接文档（v1.1.2）
+└── scripts/            # 打包（build-portable.js）、92 项回归测试（game.test.js）、Edge 界面冒烟（ui-smoke.js）
 ```
 
 ## 设计原则
