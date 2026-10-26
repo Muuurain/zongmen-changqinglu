@@ -158,6 +158,29 @@ tr:hover td { background: rgba(255,255,255,.03); }
     linear-gradient(rgba(20,22,31,.82), rgba(20,22,31,.88)),
     url("../assets/bg_main.png") center/cover no-repeat fixed;
 }
+#start-screen {
+  flex: 1; min-height: 0; display: grid; place-items: center; padding: 1rem;
+}
+.start-panel {
+  width: min(31rem, 100%); padding: 1.5rem; background: rgba(30,33,48,.94);
+  border: 0.0625rem solid var(--gold); border-radius: 0.375rem; box-shadow: 0 1rem 3rem rgba(0,0,0,.35);
+}
+#game-screen { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.start-panel h1 { color: var(--gold); font-size: 1.75rem; font-weight: normal; text-align: center; }
+.start-panel > p { min-height: 1.5rem; margin: .75rem 0 1.25rem; color: var(--text-dim); text-align: center; }
+.start-actions { display: grid; gap: .625rem; }
+.start-actions .btn { min-height: 2.5rem; }
+.new-game-form { display: grid; gap: .875rem; }
+.new-game-form label { display: grid; gap: .375rem; color: var(--text-dim); }
+.new-game-form input, .new-game-form select {
+  width: 100%; min-height: 2.5rem; padding: .5rem .625rem; font: inherit; color: var(--text);
+  background: var(--bg); border: .0625rem solid var(--border); border-radius: .25rem;
+}
+.new-game-form input:focus, .new-game-form select:focus { outline: .125rem solid var(--gold); outline-offset: .0625rem; }
+.form-error { min-height: 1.25rem; color: #e88479; }
+.disciple-timeline { max-height: 12rem; margin: .5rem 0; padding: 0 1.25rem 0 2rem; overflow-y: auto; line-height: 1.7; color: var(--text-dim); }
+.disciple-timeline li { padding: .2rem 0; overflow-wrap: anywhere; }
+.disciple-timeline li span { color: var(--gold); }
 .panel { backdrop-filter: blur(0.125rem); }
 .avatar {
   width: 2.125rem; height: 2.125rem; border-radius: 50%;
@@ -442,6 +465,10 @@ tr:hover td { background: rgba(255,255,255,.03); }
   .sprite { animation: none !important; }
   .view { animation: none; }
   .btn, .dujie-wave { transition: none; animation: none; }
+}
+@media (max-width: 35rem) {
+  .start-panel { padding: 1rem; }
+  .start-panel h1 { font-size: 1.4rem; }
 }
 .dujie-effect { height: 20rem; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0.25rem 0; }
 .dujie-effect .sprite-dujie-bolt { width: 10rem; height: 20rem; margin: 0; transform: none; background-size: 40rem 80rem; animation: play-dujie-v121 0.8s steps(1, end) 1 forwards; }

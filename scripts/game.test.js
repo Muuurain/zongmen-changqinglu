@@ -436,3 +436,104 @@ test('损坏的新版灵根与未来存档被安全拒绝，损坏自动突破�
   assert.equal(g.load(1),true);assert.equal(g.state.autoBreakthrough.strategy,'direct');assert.equal(g.state.autoBreakthrough.pills,1);
   assert.equal(g.state.autoBreakthrough.monthly,false);
 });
+
+test('自定义开局保留姓名性别和宗门名，非法输入不会清空现有周目',()=>{
+  const f=fixture(),g=f.Game;
+  const s=g.newGame({name:'林月',gender:'女',sectName:'月华宗'});
+  assert.equal(s.sectName,'月华宗');assert.equal(s.disciples[0].name,'林月');assert.equal(s.disciples[0].gender,'女');
+  const current=g.state;
+  assert.ok(g.newGame({name:'<img src=x>',gender:'女',sectName:'新宗'}).err);assert.equal(g.state,current);
+  assert.ok(g.newGame({name:'顾长风',gender:'other'}).err);assert.equal(g.state,current);
+  f.UI.showDiscipleDetail(s.disciples[0].id);assert.match(f.html,/创立宗门并成为初代掌门/);
+});
+
+test('强敌战败存在5%陨落风险，陨落原因、生平及存档均可查',()=>{
+  const f=fixture(),g=f.Game,sec=g.state.sects[0],leader=g.state.disciples[0];
+  sec.power=100000;
+  f.run('Math.random=(()=>{const rolls=[0.99,0,0];return()=>rolls.shift()??0;})()');
+  const result=g.startWar(sec);
+  assert.equal(result.win,false);assert.equal(result.casualty,'deceased');assert.equal(leader.status,'deceased');
+  assert.match(leader.exitReason,/交战时战败/);assert.match(leader.exitReason,/陨落身亡/);assert.match(result.msg,/陨落/);
+  assert.ok(leader.biography.some(entry=>entry.text===leader.exitReason));
+  f.UI.showDiscipleDetail(leader.id);assert.match(f.html,/状态：陨落/);assert.match(f.html,/生平记录/);
+  assert.equal(g.save(1),true);assert.equal(g.load(1),true);
+  const archived=g.state.disciples.find(d=>d.id===leader.id);assert.equal(archived.status,'deceased');assert.equal(g.discipleStatus(archived),'陨落');
+});
+
+test('逐出会冻结修为并清理宗门关系，掌门和外出者不可逐出',()=>{
+  const f=fixture(),g=f.Game,d=g.state.disciples[1],leader=g.state.disciples[0];
+  g.state.jobs.lingtian=[d.id];d.isElder=true;d.inBranch=true;g.state.branch={disciples:[d.id],spiritRep:0};
+  g.state.caravans=[{routeId:'north',goodsId:'lingyao',amount:1,monthsLeft:2,escortId:d.id}];
+  assert.ok(g.expelDisciple(leader.id).err);
+  assert.ok(g.expelDisciple(d.id).err);g.state.caravans=[];d.inBranch=false;g.state.branch.disciples=[d.id];
+  const expelled=g.expelDisciple(d.id);assert.equal(expelled.ok,true);assert.equal(d.alive,false);assert.equal(d.status,'expelled');
+  assert.equal(d.isElder,false);assert.equal(g.state.jobs.lingtian.includes(d.id),false);assert.equal(g.state.branch.disciples.includes(d.id),false);
+  const frozen=d.exp;g.nextMonth();assert.equal(d.exp,frozen);assert.match(d.exitReason,/逐出山门/);
+  f.UI.showDiscipleDetail(d.id);assert.match(f.html,/逐出山门/);assert.match(f.html,/生平记录/);
+  g.state.disciples[2].adventure={placeId:'wild',monthsLeft:2};
+  assert.ok(g.expelDisciple(g.state.disciples[2].id).err);
+});
+
+test('旧档离册原因未知会保留为未知状态，开始界面含新建、继续和读档入口',()=>{
+  const f=fixture(),g=f.Game,old=JSON.parse(JSON.stringify(g.state));
+  old.disciples[1].alive=false;delete old.disciples[1].status;delete old.disciples[1].biography;old.saveVersion=3;
+  f.storage.set(g.saveKey(1),JSON.stringify(old));assert.equal(g.load(1),true);
+  const d=g.state.disciples[1];assert.equal(g.discipleStatus(d),'离册（旧档原因未记载）');
+  f.UI.renderDisciples();assert.match(f.run('document.getElementById("view-disciples").innerHTML'),/人物留档/);
+  const html=fs.readFileSync(path.join(__dirname,'..','index.html'),'utf8');
+  for(const id of ['start-screen','btn-continue','btn-new-game','btn-start-load','leader-name','leader-gender','new-sect-name']) assert.match(html,new RegExp(`id="${id}"`));
+});
+
+test('战损陨落概率边界为5%，重伤不改变身份，重复陨落不会重复传承',()=>{
+  const f=fixture(),g=f.Game,d=g.state.disciples[1];
+  f.random(0.05);assert.equal(g.resolveCombatCasualty(d,6,'遭遇魔修'),'injured');
+  assert.equal(d.injuredMonths,6);assert.equal(d.status,'active');assert.equal(d.alive,true);
+  f.random(0.04999);assert.equal(g.resolveCombatCasualty(d,6,'遭遇魔修'),'deceased');
+  const snapshot=JSON.stringify(g.state);assert.equal(g.resolveCombatCasualty(d,6,'再次结算'),'unharmed');
+  assert.equal(JSON.stringify(g.state),snapshot);
+});
+
+test('逐出高阶长老不会发放死亡传承，最后战力和生平不随月度或长老加成变化',()=>{
+  const f=fixture(),g=f.Game,d=g.state.disciples[1];f.quiet();
+  d.realm=4;d.isElder=true;g.leaveLegacy=()=>{throw Error('逐出不应触发死亡传承');};
+  assert.equal(g.expelDisciple(d.id).ok,true);const snapshot=JSON.stringify(d);
+  const other=g.state.disciples[2];other.realm=4;other.isElder=true;other.cls='sword';
+  g.nextMonth();assert.equal(JSON.stringify(d),snapshot);assert.equal(g.cultivationGain(d),0);
+  assert.ok(g.tryBreakthrough(d.id).err);assert.ok(g.assignJob('lingtian',d.id));
+  assert.equal(g.save(1),true);assert.equal(g.load(1),true);assert.equal(g.state.disciples[1].finalPower,d.finalPower);
+});
+
+test('逐出不得吞掉待选历练事件，也不能逐出渡劫者和护法',()=>{
+  const f=fixture(),g=f.Game,[a,d]=g.state.disciples;
+  g.state.pendingEvents=[{type:'adv',dId:d.id,ev:f.ADV_EVENTS[0]}];assert.ok(g.expelDisciple(d.id).err);
+  g.state.pendingEvents=[];a.tribulation={wave:1,guardians:[d.id]};assert.ok(g.expelDisciple(d.id).err);
+  a.tribulation=null;d.tribulation={wave:1,guardians:[]};assert.ok(g.expelDisciple(d.id).err);
+  assert.equal(d.alive,true);
+});
+
+test('全员在攻城胜利时陨落也不能通过战后合并使宗门复活',()=>{
+  const f=fixture(),g=f.Game,sec=g.state.sects[0];
+  g.state.disciples.slice(1).forEach(d=>g.removeDisciple(d));sec.relation=-100;sec.power=100000;f.random(0);
+  const r=g.startAssault(sec.id,{front:[g.state.disciples[0].id],mid:[],back:[]},'frontal');
+  assert.equal(r.win,true);assert.equal(r.fallen.length,1);assert.equal(r.needPostWar,false);assert.equal(g.state.gameOver,true);
+  assert.equal(sec.broken,false);assert.ok(g.postWar(sec.id,'merge').err);assert.equal(g.aliveDisciples().length,0);
+});
+
+test('离册状态和生平损坏时读档拒绝且当前周目不变',()=>{
+  const f=fixture(),g=f.Game,current=g.state;
+  for(const change of [d=>{d.status='deceased';},d=>{d.biography=[{date:'太元1年1月',age:20,realm:99,stage:0,kind:'bad',text:'异常'}];},d=>{d.exitTime={year:1,month:13};}]){
+    const broken=JSON.parse(JSON.stringify(current));change(broken.disciples[1]);f.storage.set(g.saveKey(1),JSON.stringify(broken));
+    assert.equal(g.load(1),false);assert.equal(g.state,current);
+  }
+});
+
+test('真实死亡清理护送、分宗及护法引用，逐出与飞升记录保持不同',()=>{
+  const f=fixture(),g=f.Game,d=g.state.disciples[1],caster=g.state.disciples[2];
+  d.inBranch=true;d.isElder=true;g.state.branch={disciples:[d.id],spiritRep:0};g.state.jobs.lingtian=[d.id];
+  caster.tribulation={wave:1,guardians:[d.id]};g.state.caravans=[{escortId:d.id}];
+  g.removeDisciple(d,true,'deceased','阵亡');
+  assert.equal(g.state.caravans[0].escortId,null);assert.equal(g.state.branch.disciples.length,0);assert.equal(caster.tribulation.guardians.length,0);
+  assert.equal(g.state.jobs.lingtian.length,0);assert.equal(d.isElder,false);
+  caster.tribulation=null;g.removeDisciple(caster,false,'ascended','飞升仙界');assert.equal(g.discipleStatus(caster),'飞升');
+  assert.equal(g.discipleStatus(d),'陨落');assert.match(caster.biography.at(-1).text,/飞升/);
+});

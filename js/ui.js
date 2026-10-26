@@ -6,9 +6,6 @@ const UI = {
   currentView: "overview",
 
   init() {
-    // 尝试读取自动存档，否则开新局
-    if (!Game.load(0)) Game.newGame();
-
     // v1.1.1：DPI 自适应——依据窗口尺寸设定根字号，CSS 全部使用 rem，元素随分辨率等比缩放
     const fitUI = () => {
       const scale = Math.min(window.innerWidth / 1360, window.innerHeight / 800);
@@ -35,6 +32,12 @@ const UI = {
     document.getElementById("btn-next-month").onclick = () => this.onNextMonth();
     document.getElementById("btn-save").onclick = () => this.showSaveLoad("save");
     document.getElementById("btn-load").onclick = () => this.showSaveLoad("load");
+    document.getElementById("btn-menu").onclick = () => this.showStartScreen();
+    document.getElementById("btn-continue").onclick = () => this.continueGame();
+    document.getElementById("btn-new-game").onclick = () => this.showNewGameForm();
+    document.getElementById("btn-start-load").onclick = () => this.showSaveLoad("load");
+    document.getElementById("new-game-form").onsubmit = event => { event.preventDefault(); this.startNewGame(); };
+    document.getElementById("new-game-form").oninput = () => { document.getElementById("new-game-error").textContent = ""; };
     // BGM
     const bgm = document.getElementById("bgm");
     const bgmBtn = document.getElementById("btn-bgm");
@@ -50,6 +53,65 @@ const UI = {
     document.addEventListener("click", e => {
       if (e.target.closest(".btn") && !e.target.closest(".btn:disabled")) this.sfx("click");
     });
+    this.refreshStartMenu();
+  },
+  refreshStartMenu() {
+    const save = Game.saveInfo(0);
+    this._hasAutoSave = !!save;
+    document.getElementById("btn-continue").disabled = !Game.state && !save;
+    document.getElementById("btn-continue").textContent = Game.state ? "继续本次修行" : "继续上次修行";
+    document.getElementById("start-save-info").textContent = save
+      ? `${save.sectName} · 太元${save.year}年${save.month}月 · 第${save.gen}代掌门`
+      : "太元年间，山门初立。";
+  },
+
+  showStartScreen() {
+    this.closeModal();
+    const saved = !Game.state || Game.save(0);
+    this.refreshStartMenu();
+    document.getElementById("game-screen").classList.add("hidden");
+    document.getElementById("start-screen").classList.remove("hidden");
+    document.getElementById("start-actions").classList.remove("hidden");
+    document.getElementById("new-game-form").classList.add("hidden");
+    if (!saved) this.toast("当前进度保留在本次运行中，但自动存档失败；请继续游戏后手动存档");
+  },
+  continueGame() {
+    if (!Game.state && !Game.load(0)) return this.toast("自动存档不存在或已损坏");
+    this.enterGame();
+  },
+  showNewGameForm() {
+    if (this._hasAutoSave || Game.state) {
+      return this.confirm("开启新周目会覆盖自动存档，是否继续？", () => this._showNewGameForm(), true);
+    }
+    this._showNewGameForm();
+  },
+  _showNewGameForm() {
+    document.getElementById("start-actions").classList.add("hidden");
+    document.getElementById("new-game-form").classList.remove("hidden");
+    document.getElementById("new-game-error").textContent = "";
+  },
+  cancelNewGame() {
+    document.getElementById("new-game-form").classList.add("hidden");
+    document.getElementById("start-actions").classList.remove("hidden");
+  },
+  startNewGame() {
+    const result = Game.newGame({
+      name: document.getElementById("leader-name").value,
+      gender: document.getElementById("leader-gender").value,
+      sectName: document.getElementById("new-sect-name").value
+    });
+    if (result.err) {
+      document.getElementById("new-game-error").textContent = result.err;
+      return;
+    }
+    const saved = Game.save(0);
+    this.enterGame();
+    if (!saved) this.toast("新周目已开始，但自动存档失败，请手动存档");
+  },
+  enterGame() {
+    document.getElementById("start-screen").classList.add("hidden");
+    document.getElementById("game-screen").classList.remove("hidden");
+    this.switchView("overview");
     this.render();
     this._drainQueue();
   },
@@ -132,6 +194,14 @@ const UI = {
       law: "portrait_role_discipline", envoy: "portrait_role_scholar", preach: "portrait_role_scholar" };
     return map[cls] ? `assets/portrait/${map[cls]}.png` : null;
   },
+  escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+  },
+  eventOptionDescription(option) {
+    const ef = option.effect || {};
+    const risk = ["expedition", "beastFight", "advGamble", "justiceFight", "beastDuel", "worldWar", "tianmoWar"].some(key => ef[key]);
+    return `${option.desc || ""}${risk ? `（战损时另有 ${Math.round(COMBAT_FATALITY_CHANCE * 100)}% 概率陨落）` : ""}`;
+  },
   // 事件插画映射（按事件 id 归类）
   eventIll(evId) {
     const map = {
@@ -165,7 +235,7 @@ const UI = {
     const bHtml = Object.entries(s.buildings).filter(([, lv]) => lv > 0)
       .map(([id, lv]) => `<span class="tag jade">${BUILDINGS[id].name} Lv.${lv}</span>`).join("");
     el.innerHTML = `
-      ${s.gameOver ? `<div class="panel"><h3 style="color:#d05a4e">宗门覆灭</h3><p>道统已断。可点击顶部「读档」或刷新重开（新周目请清除存档）。</p></div>` : ""}
+      ${s.gameOver ? `<div class="panel"><h3 style="color:#d05a4e">宗门覆灭</h3><p>道统已断。可在弟子页查阅人物留档，或点击顶部「主菜单」开创新宗门，也可「读档」继续往昔进度。</p></div>` : ""}
       <div class="panel">
         <h3>宗门气象</h3>
         <div class="stat-row">
@@ -236,6 +306,12 @@ const UI = {
         </td>
       </tr>`;
     }).join("");
+    const archive = Game.state.disciples.filter(d => !d.alive)
+      .sort((a, b) => ((b.exitTime?.year || 0) * 12 + (b.exitTime?.month || 0)) - ((a.exitTime?.year || 0) * 12 + (a.exitTime?.month || 0)) || b.id - a.id)
+      .map(d => `<tr><td>${this.escapeHtml(d.name)}</td><td>${Game.discipleStatus(d)}</td>
+        <td>${REALMS[d.realm].name}${STAGES[d.stage]}</td><td>${Math.floor(d.age)} 岁</td>
+        <td>${this.escapeHtml(d.exitReason || "旧存档未记录离宗原因")}</td>
+        <td><button class="btn small" onclick="UI.showDiscipleDetail(${d.id})">生平</button></td></tr>`).join("");
     const cfg = Game.state.autoBreakthrough;
     el.innerHTML = `<div class="panel"><h3>自动突破</h3>
       <div class="auto-controls">
@@ -250,7 +326,12 @@ const UI = {
       <div class="table-scroll"><table><thead><tr>
         <th>姓名</th><th>境界</th><th>灵根</th><th>职业</th><th>修为</th>
         <th>战力</th><th>忠诚</th><th>寿元</th><th>岗位</th><th>自动突破</th><th>操作</th>
-      </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      </tr></thead><tbody>${rows}</tbody></table></div></div>
+      <div class="panel"><h3>人物留档（${Game.state.disciples.length - list.length}）</h3>
+        <p class="scroll-hint">陨落者、逐出者及其他离宗人物保留最后境界、离宗原因与已记录生平；离宗后不再参与修炼、战斗、岗位及宗门加成。</p>
+        <div class="table-scroll"><table><thead><tr><th>姓名</th><th>状态</th><th>最后境界</th><th>年龄</th><th>离宗记录</th><th>查看</th></tr></thead>
+        <tbody>${archive || `<tr><td colspan="6">暂无人物留档</td></tr>`}</tbody></table></div>
+      </div>`;
   },
   updateAutoBreakthrough() {
     const r = Game.setAutoBreakthrough({ strategy: document.getElementById("auto-bt-strategy").value,
@@ -263,6 +344,17 @@ const UI = {
     const r = Game.setDiscipleAutoBreakthrough(id, enabled);
     if (r.err) return this.toast(r.err);
     if (!Game.save(0)) this.toast("弟子设置已应用，但自动保存失败，请手动存档");
+  },
+  showExpel(id) {
+    const d = Game.state.disciples.find(x => x.id === id && x.alive);
+    if (!d) return;
+    this.confirm(`确定将 ${d.name} 逐出山门？其修为与生平会永久留档，但将立即失去宗门身份、岗位、供奉和战斗身份；此操作不可撤销。`, () => {
+      const result = Game.expelDisciple(id);
+      if (result.err) return this.toast(result.err);
+      this.render();
+      this.modal(`<h2>已逐出山门</h2><div class="modal-text">${this.escapeHtml(d.name)} 已离宗，状态记为“逐出山门”。人物留档仍可在弟子页查看，之后不会继续修炼或参与宗门事务。${result.saved ? "" : "\n自动保存失败，请手动存档。"}</div>
+        <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal()">知道了</button></div>`);
+    }, true);
   },
   confirmAutoBreakthrough() {
     const err = Game.autoBreakthroughError();
@@ -281,22 +373,29 @@ const UI = {
   showDiscipleDetail(id) {
     const d = Game.state.disciples.find(x => x.id === id);
     if (!d) return;
+    const archived = !d.alive;
+    const timeline = (d.biography || []).slice().reverse().map(entry =>
+      `<li><span>${this.escapeHtml(entry.date)}</span> · ${entry.age} 岁 · ${REALMS[entry.realm].name}${STAGES[entry.stage]} · ${this.escapeHtml(entry.text)}</li>`).join("");
+    const details = [
+      `性别：${d.gender}　${archived ? "离宗时年龄" : "年龄"}：${Math.floor(d.age)}　${d.status === "deceased" ? "寿元已终止" : `剩余寿元：${Math.floor(d.lifespanLeft)} 年`}`,
+      `状态：${Game.discipleStatus(d)}`,
+      archived ? `离宗时间：${d.exitTime ? `太元${d.exitTime.year}年${d.exitTime.month}月` : "旧档未记录"}\n离宗记录：${this.escapeHtml(d.exitReason || "旧存档未记录离宗原因")}` : "",
+      `境界：${REALMS[d.realm].name}${STAGES[d.stage]}`,
+      `灵根：${spiritRootInfo(d.root).name}（${spiritRootInfo(d.root).grade}，${spiritRootInfo(d.root).count} 属性，修炼×${spiritRootInfo(d.root).speed}）`,
+      archived ? "离宗后修为与状态冻结，不再参与宗门事务。" : `自动突破：${d.autoBreakthrough ? "参与（可在弟子名录取消勾选）" : "不参与"}`,
+      `职业：${CLASSES[d.cls].name}（${CLASSES[d.cls].cat}类 - ${CLASSES[d.cls].desc}）`,
+      `心性：${d.personality}　气运：${d.luck}　悟性：${d.comprehension}`,
+      `忠诚度：${d.loyalty}　${archived ? `离宗前战力：${d.finalPower ?? "旧档未记录"}` : `综合战力：${Game.disciplePower(d)}`}`,
+      archived ? "" : `每月修为增长：${Game.cultivationGain(d).toFixed(2)}（空闲正常修炼，生产岗位半速兼修）`,
+      d.injuredMonths > 0 ? archived ? `离宗时伤势：重伤（原需休养 ${d.injuredMonths} 个月）` : `⚠ 重伤中，还需 ${d.injuredMonths} 个月恢复` : "",
+      d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%" : ""
+    ].filter(Boolean).join("\n");
     this.modal(`
-      <h2>${d.name} ${d.isLeader ? "（掌门）" : ""}</h2>
-      <span class="avatar-wrap big">${this.avatar(d, "big")}<span class="sprite sprite-aura"></span></span>
-      <div class="modal-text">
-性别：${d.gender}　年龄：${Math.floor(d.age)}　剩余寿元：${Math.floor(d.lifespanLeft)} 年
-境界：${REALMS[d.realm].name}${STAGES[d.stage]}
-灵根：${spiritRootInfo(d.root).name}（${spiritRootInfo(d.root).grade}，${spiritRootInfo(d.root).count} 属性，修炼×${spiritRootInfo(d.root).speed}）
-自动突破：${d.autoBreakthrough ? "参与（可在弟子名录取消勾选）" : "不参与"}
-职业：${CLASSES[d.cls].name}（${CLASSES[d.cls].cat}类 - ${CLASSES[d.cls].desc}）
-心性：${d.personality}　气运：${d.luck}　悟性：${d.comprehension}
-忠诚度：${d.loyalty}　综合战力：${Game.disciplePower(d)}
-每月修为增长：${Game.cultivationGain(d).toFixed(2)}（空闲正常修炼，生产岗位半速兼修）
-${d.injuredMonths > 0 ? `⚠ 重伤中，还需 ${d.injuredMonths} 个月恢复\n` : ""}
-${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
-      </div>
-      <div class="modal-footer"><button class="btn" onclick="UI.closeModal()">关闭</button></div>`);
+      <h2>${this.escapeHtml(d.name)} ${d.isLeader ? "（掌门）" : ""}</h2>
+      <span class="avatar-wrap big">${this.avatar(d, "big")}${archived ? "" : `<span class="sprite sprite-aura"></span>`}</span>
+      <div class="modal-text">${details}</div>
+      <h3>生平记录</h3><ol class="disciple-timeline">${timeline || "<li>暂无生平记录</li>"}</ol>
+      <div class="modal-footer">${!archived && !d.isLeader ? `<button class="btn danger" onclick="UI.closeModal();UI.showExpel(${d.id})">逐出山门</button>` : ""}<button class="btn" onclick="UI.closeModal()">关闭</button></div>`);
   },
 
   // ---------- 突破 ----------
@@ -502,7 +601,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render()">散会</button></div>`);
   },
   doRaid() {
-    this.confirm("发动联盟讨伐魔道？胜则缴获丰厚、声望大涨；败则弟子重伤、联盟威望受损。", () => {
+    this.confirm(`发动联盟讨伐魔道？胜则缴获丰厚、声望大涨；败则弟子重伤、联盟威望受损。\n战损弟子另有 ${Math.round(COMBAT_FATALITY_CHANCE * 100)}% 概率陨落，生平将保留。`, () => {
       this.warBgm();
       const r = Game.allianceRaid();
       if (r.err) return this.toast(r.err);
@@ -537,7 +636,8 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       this.modal(`
         <h2>⚔ 攻打【${sec.name}】山门</h2>
         <div class="modal-text">守方战力（含护山大阵 +${Math.round(WAR_CONFIG.defenseArrayBonus * 100)}%）：<b style="color:#d05a4e">${def}</b>
-我方出战战力：<b style="color:var(--gold)">${atk}</b>（职业与排位匹配有加成）</div>
+我方出战战力：<b style="color:var(--gold)">${atk}</b>（职业与排位匹配有加成）
+战败或守方强于我方时，战损弟子有 ${Math.round(COMBAT_FATALITY_CHANCE * 100)}% 概率陨落；其余照常重伤。陨落后保留生平。</div>
         <div class="war-formation">
           ${["front", "mid", "back"].map(row => `<div class="war-row">
             <h4>${{ front: "前排（体修×1.4）", mid: "中排（剑修×1.3）", back: "后排（阵修×1.4）" }[row]}</h4>
@@ -593,7 +693,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     if (r.win && r.needPostWar) {
       this._showPostWar(sectId, r.msg);
     } else {
-      this.modal(`<div class="sprite sprite-sword-clash"></div><h2>败北……</h2><div class="modal-text">${r.msg}</div>
+      this.modal(`<div class="sprite sprite-sword-clash"></div><h2>${Game.state.gameOver ? "道统断绝……" : "败北……"}</h2><div class="modal-text">${r.msg}</div>
         <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render()">收兵回山</button></div>`);
       document.getElementById("modal").classList.add("war-result");
     }
@@ -906,7 +1006,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const act = DIPLO_ACTIONS.find(a => a.id === actionId);
     const sec = Game.state.sects.find(x => x.id === sectId);
     const danger = actionId === "declare";
-    this.confirm(`对【${sec.name}】执行【${act.name}】？\n${act.desc}${danger ? "\n\n⚠ 宣战不可逆，战败损失惨重！" : ""}`, () => {
+    this.confirm(`对【${sec.name}】执行【${act.name}】？\n${act.desc}${danger ? `\n\n⚠ 宣战不可逆；战败时战损弟子有 ${Math.round(COMBAT_FATALITY_CHANCE * 100)}% 概率陨落，生平保留。` : ""}`, () => {
       const r = Game.diploAction(sectId, actionId);
       if (r.err) return this.toast(r.err);
       if (r.war) {
@@ -997,7 +1097,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         <div class="modal-text">${ev.text}</div>
         <div class="modal-options">
           ${ev.options.map((o, i) => `<button class="btn opt-btn" onclick="UI.chooseWorld(${i})">
-            ${o.label}<span class="opt-desc">${o.desc}</span></button>`).join("")}
+            ${o.label}<span class="opt-desc">${this.eventOptionDescription(o)}</span></button>`).join("")}
         </div>`);
       document.getElementById("modal").classList.add("event-mijing");
     } else if (item.type === "faction") {
@@ -1023,7 +1123,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         <div class="modal-text">${ev.text.replaceAll("{name}", d.name)}</div>
         <div class="modal-options">
           ${ev.options.map((o, i) => `<button class="btn opt-btn" onclick="UI.chooseAdv(${i})">
-            ${o.label}<span class="opt-desc">${o.desc}</span></button>`).join("")}
+            ${o.label}<span class="opt-desc">${this.eventOptionDescription(o)}</span></button>`).join("")}
         </div>`);
       document.getElementById("modal").classList.add("event-mijing");
     } else if (item.type === "event") {
@@ -1073,7 +1173,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       <div class="modal-text">${(msgs && msgs.length ? msgs.join("\n") + "\n\n" : "")}${ev.text}</div>
       <div class="modal-options">
         ${ev.options.map((o, i) => `<button class="btn opt-btn" onclick="UI.chooseEvent('${ev.id}',${i})">
-          ${o.label}<span class="opt-desc">${o.desc}</span></button>`).join("")}
+          ${o.label}<span class="opt-desc">${this.eventOptionDescription(o)}</span></button>`).join("")}
       </div>`);
     document.getElementById("modal").classList.add("event-mijing");
   },
@@ -1111,17 +1211,14 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   },
   doLoad(slot) {
     this.confirm("读取存档将覆盖当前进度，确定？", () => {
-      if (Game.load(slot)) { this.closeModal(); this.render(); this._drainQueue(); }
+      if (Game.load(slot)) { this.closeModal(); this.enterGame(); }
       else this.toast("该档位为空或存档已损坏，当前进度未改变");
     });
   },
   doReset() {
-    this.confirm("⚠ 确定放弃当前宗门、开启新周目？此操作不可撤销！", () => {
-      Game.newGame();
-      Game.save(0);
-      this.closeModal();
-      this.render();
-      this.toast("新周目开启：山门初立，万象更新。");
+    this.confirm("⚠ 开启新周目将覆盖自动存档，确定继续？", () => {
+      this.showStartScreen();
+      this._showNewGameForm();
     }, true);
   },
 

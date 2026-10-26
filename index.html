@@ -7,6 +7,28 @@
 </head>
 <body>
 <div id="app">
+  <section id="start-screen" aria-labelledby="start-title">
+    <div class="start-panel">
+      <h1 id="start-title">宗门长青录</h1>
+      <p id="start-save-info">太元年间，山门初立。</p>
+      <div id="start-actions" class="start-actions">
+        <button id="btn-continue" class="btn primary" disabled>继续上次修行</button>
+        <button id="btn-new-game" class="btn">开创新宗门</button>
+        <button id="btn-start-load" class="btn">读取存档</button>
+      </div>
+      <form id="new-game-form" class="new-game-form hidden">
+        <label>初代宗主姓名<input id="leader-name" name="leaderName" value="顾长风" maxlength="20" required autocomplete="off"></label>
+        <label>性别<select id="leader-gender" name="leaderGender"><option value="男">男</option><option value="女">女</option></select></label>
+        <label>宗门名称<input id="new-sect-name" name="sectName" value="青云观" maxlength="20" required autocomplete="off"></label>
+        <div id="new-game-error" class="form-error" aria-live="polite"></div>
+        <div class="start-actions">
+          <button type="button" class="btn" onclick="UI.cancelNewGame()">返回</button>
+          <button type="submit" class="btn primary">开宗立派</button>
+        </div>
+      </form>
+    </div>
+  </section>
+  <div id="game-screen" class="hidden">
   <!-- 顶部：宗门信息 + 资源栏 -->
   <header id="topbar">
     <div class="sect-info">
@@ -19,6 +41,7 @@
       <button id="btn-bgm" class="btn small" title="音乐开关">♪</button>
       <button id="btn-save" class="btn small">存档</button>
       <button id="btn-load" class="btn small">读档</button>
+      <button id="btn-menu" class="btn small" title="返回开始界面">主菜单</button>
       <button id="btn-next-month" class="btn primary">闭关一月 ▸</button>
     </div>
   </header>
@@ -57,6 +80,7 @@
 
   <!-- v1.1.1：全局 HUD 印章（固定于主界面右下角，不遮挡任何弹窗内容） -->
   <div id="hud-logo"><img src="assets/ui/ui_seal_stamp.png" alt="" onerror="this.parentNode.style.display='none'"></div>
+  </div>
 
   <!-- 通用弹窗 -->
   <div id="modal-mask" class="modal-mask hidden">

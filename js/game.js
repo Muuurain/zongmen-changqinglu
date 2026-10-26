@@ -4,12 +4,23 @@
  * 「闭关一月」时推进；离线无任何收益。
  * ============================================================ */
 
+const COMBAT_FATALITY_CHANCE = 0.05;
+
 const Game = {
   state: null,
 
   // ---------- 初始化 / 新周目 ----------
-  newGame() {
+  newGame(options = {}) {
+    options = options && typeof options === "object" ? options : {};
+    const name = String(options.name ?? "顾长风").trim();
+    const gender = options.gender ?? "男";
+    const sectName = String(options.sectName ?? INITIAL_STATE.sectName).trim();
+    const validName = value => Array.from(value).length > 0 && Array.from(value).length <= 20 && /^[\p{L}\p{N}·・ _-]+$/u.test(value);
+    if (!validName(name)) return { err: "宗主姓名限 1 至 20 个中英文字符或常用姓名符号" };
+    if (!["男", "女"].includes(gender)) return { err: "请选择有效性别" };
+    if (!validName(sectName)) return { err: "宗门名称限 1 至 20 个中英文字符或常用名称符号" };
     const s = JSON.parse(JSON.stringify(INITIAL_STATE));
+    s.sectName = sectName;
     s.disciples = [];
     s.jobs = {};            // buildingId -> [discipleId]
     s.sects = JSON.parse(JSON.stringify(NPC_SECTS_TEMPLATE));
@@ -27,8 +38,8 @@ const Game = {
     this.state = s;
 
     // 初始：筑基掌门 + 2 炼气弟子
-    const z = this.makeDisciple({ realm: 1, isLeader: true });
-    z.name = "顾长风"; z.personality = "沉稳"; z.cls = "sword";
+    const z = this.makeDisciple({ realm: 1, isLeader: true, name, gender });
+    z.personality = "沉稳"; z.cls = "sword";
     const d1 = this.makeDisciple({ realm: 0 });
     const d2 = this.makeDisciple({ realm: 0 });
     s.disciples.push(z, d1, d2);
@@ -39,14 +50,14 @@ const Game = {
   // ---------- 弟子生成 ----------
   makeDisciple(opts = {}) {
     const s = this.state;
-    const gender = Math.random() < 0.5 ? "男" : "女";
+    const gender = opts.gender || (Math.random() < 0.5 ? "男" : "女");
     const id = s ? s.nextId++ : 1;
     const name = opts.name ||
       SURNAMES[rnd(SURNAMES.length)] + (gender === "男" ? GIVEN_M[rnd(GIVEN_M.length)] : GIVEN_F[rnd(GIVEN_F.length)]);
     const root = this.rollSpiritRoot(opts);
     const realm = opts.realm || 0;
     const age = opts.isLeader ? 45 : ri(15, 25);
-    return {
+    const d = {
       id, name, gender,
       avatarId: (gender === "男" ? "m" : "f") + ((id % 4) + 1),
       realm, stage: 0, exp: 0,
@@ -61,8 +72,12 @@ const Game = {
       foundationDmg: false,
       injuredMonths: 0,
       isLeader: !!opts.isLeader,
-      alive: true
+      alive: true,
+      status: "active",
+      biography: []
     };
+    this.recordDisciple(d, "joined", opts.isLeader ? "创立宗门并成为初代掌门。" : "拜入山门，成为宗门弟子。");
+    return d;
   },
 
   // ---------- 数值计算 ----------
@@ -127,14 +142,59 @@ const Game = {
     return this.cultivateSpeed(d) * 10 * (this.hasJob(d) && !this.cultivating(d) ? 0.5 : 1);
   },
   addExp(d, amount) { d.exp = Math.min(stageExpNeed(d.realm, d.stage), Math.max(0, d.exp + amount)); },
-  removeDisciple(d, legacy = true) {
+  recordDisciple(d, kind, text) {
+    if (!d) return;
+    if (!Array.isArray(d.biography)) d.biography = [];
+    const s = this.state;
+    d.biography.push({ date: s ? `太元${s.year}年${s.month}月` : "入门", age: Math.floor(d.age),
+      realm: d.realm, stage: d.stage, kind, text });
+  },
+  discipleStatus(d) {
+    if (!d) return "未知";
+    const status = d.status || (d.alive ? "active" : d.ascended ? "ascended" : "unknown");
+    return ({ active: "在宗", deceased: "陨落", expelled: "逐出山门", departed: "离宗", ascended: "飞升", unknown: "离册（旧档原因未记载）" })[status] || "离册（旧档原因未记载）";
+  },
+  removeDisciple(d, legacy = true, status = legacy ? "deceased" : "departed", reason = legacy ? "身死道消" : "离开宗门") {
     if (!d || !d.alive) return;
     const wasLeader = d.isLeader;
-    d.alive = false; d.isLeader = false; d.adventure = null; d.tribulation = null;
+    d.finalPower = this.disciplePower(d);
+    d.exitTime = { year: this.state.year, month: this.state.month };
+    d.alive = false; d.status = status; d.exitReason = reason;
+    d.isLeader = false; d.isElder = false; d.inBranch = false; d.autoBreakthrough = false;
+    d.adventure = null; d.tribulation = null;
     this.removeFromJobs(d.id);
+    if (this.state.branch && Array.isArray(this.state.branch.disciples))
+      this.state.branch.disciples = this.state.branch.disciples.filter(id => id !== d.id);
+    this.state.caravans.forEach(c => { if (c.escortId === d.id) c.escortId = null; });
+    this.state.disciples.forEach(x => {
+      if (x.tribulation) x.tribulation.guardians = x.tribulation.guardians.filter(id => id !== d.id);
+    });
+    this.recordDisciple(d, status, reason);
     if (legacy) this.leaveLegacy(d);
     if (wasLeader) this.handleLeaderDeath();
     this.state.gameOver = !this.aliveDisciples().length;
+  },
+  resolveCombatCasualty(d, injuredMonths, reason) {
+    if (!d || !d.alive) return "unharmed";
+    if (Math.random() < COMBAT_FATALITY_CHANCE) {
+      this.removeDisciple(d, true, "deceased", `${reason}，遭强敌重创，陨落身亡。`);
+      return "deceased";
+    }
+    d.injuredMonths = injuredMonths;
+    this.recordDisciple(d, "injured", `遭遇强敌：${reason}，重伤 ${injuredMonths} 个月。`);
+    return "injured";
+  },
+  expelDisciple(id) {
+    const d = this.state.disciples.find(x => x.id === id);
+    if (!d || !d.alive) return { err: "该弟子不在宗门" };
+    if (d.isLeader) return { err: "掌门不可逐出山门" };
+    if (d.adventure || this.escorting(d) || d.tribulation || this.state.disciples.some(x => x.alive && x.tribulation && x.tribulation.guardians.includes(id)))
+      return { err: "弟子外出、护送或参与渡劫期间不可逐出" };
+    if (this.state.pendingEvents.some(item => item.type === "adv" && item.dId === id)) return { err: "请先处理该弟子的历练事件" };
+    this.removeDisciple(d, false, "expelled", "经宗门裁决，逐出山门；不再享有宗门身份、岗位与供奉。");
+    this.log(`${d.name} 被逐出山门，人物留档仍可查阅。`, "bad");
+    const saved = this.save(0);
+    return { ok: true, disciple: d, saved };
   },
   warError(sect) {
     if (this.state.gameOver) return "宗门已覆灭";
@@ -318,10 +378,12 @@ const Game = {
         d.stage = 0;
         d.lifespanLeft += Math.round(REALMS[d.realm].lifespan * 0.5);
         if (this.addHeritage) this.addHeritage(HERITAGE.sources.majorBreakthrough, `${d.name} 突破大境界`);
+        this.recordDisciple(d, "breakthrough", `突破至 ${REALMS[d.realm].name}期。`);
         this.log(`【大喜】${d.name} 成功突破至【${REALMS[d.realm].name}期】！寿元大增！`, "good");
         return { ok: true, major: true };
       }
       d.stage++;
+      this.recordDisciple(d, "breakthrough", `突破至 ${REALMS[d.realm].name}${STAGES[d.stage]}。`);
       this.log(`${d.name} 突破至 ${REALMS[d.realm].name}${STAGES[d.stage]}。`, "good");
       return { ok: true, major: false };
     }
@@ -335,10 +397,11 @@ const Game = {
     } else if (penalty.type === "foundation") {
       d.foundationDmg = true;
     } else if (penalty.type === "death") {
-      this.removeDisciple(d);
+      this.removeDisciple(d, true, "deceased", "突破失败，走火入魔，身死道消。");
       msg = `${d.name} 突破失败，走火入魔，身死道消！宗门上下一片哀恸。`;
     }
     d.loyalty = Math.max(0, d.loyalty - 5);
+    if (d.alive) this.recordDisciple(d, "breakthrough_failed", msg);
     this.log(msg, "bad");
     return { ok: false, penalty: penalty.type, msg };
   },
@@ -399,6 +462,7 @@ const Game = {
     const ratio = myPower / Math.max(1, theirPower);
     const winRate = clamp(0.15 + ratio * 0.4, 0.05, 0.9);
     const win = Math.random() < winRate;
+    fighters.forEach(d => this.recordDisciple(d, "battle", `参与对【${sect.name}】的宗门战争，${win ? "获胜" : "战败"}。`));
     if (win) {
       const loot = { lingshi: ri(80, 200), lingyao: ri(5, 20), kuangshi: ri(10, 30) };
       this.gainRes(loot);
@@ -413,10 +477,12 @@ const Game = {
     const loss = Math.round(s.resources.lingshi * 0.2);
     s.resources.lingshi -= loss;
     const victim = fighters[rnd(fighters.length)];
-    if (victim) { victim.injuredMonths = 6; }
+    const casualty = victim ? this.resolveCombatCasualty(victim, 6, `与【${sect.name}】交战时战败`) : "unharmed";
     s.reputation -= 3;
-    this.log(`【战报】我军进攻【${sect.name}】失利，折损灵石×${loss}，${victim ? victim.name + "重伤" : ""}。`, "bad");
-    return { ok: true, war: true, win: false, msg: `战败！损失灵石×${loss}，${victim ? victim.name + " 重伤六个月，" : ""}声望 -3。` };
+    const fate = victim ? `${victim.name}${casualty === "deceased" ? "陨落" : "重伤六个月"}` : "";
+    this.log(`【战报】我军进攻【${sect.name}】失利，折损灵石×${loss}，${fate}。`, "bad");
+    return { ok: true, war: true, win: false, casualty, victim: victim && victim.id,
+      msg: `战败！损失灵石×${loss}，${fate ? fate + "，" : ""}声望 -3。` };
   },
   randomAliveDisciple() {
     const list = this.aliveDisciples();
@@ -493,7 +559,7 @@ const Game = {
       d.lifespanLeft -= 1 / 12;
       if (d.lifespanLeft <= 0) {
         const wasLeader = d.isLeader;
-        this.removeDisciple(d);
+        this.removeDisciple(d, true, "deceased", "寿元耗尽坐化。");
         if (wasLeader) {
           msgs.push(`【讣告】掌门 ${d.name} 寿元耗尽坐化，宗门已自动推定继任者（如有）。`);
           this.log(`掌门 ${d.name} 寿元耗尽坐化。`, "bad");
@@ -505,7 +571,7 @@ const Game = {
       if (!d.alive) return;
       // 低忠诚弟子可能出走
       if (d.loyalty <= 15 && !d.isLeader && Math.random() < 0.2) {
-        this.removeDisciple(d, false);
+        this.removeDisciple(d, false, "departed", "忠诚度归零，叛逃出宗。");
         msgs.push(`【叛逃】${d.name} 对宗门心灰意冷，连夜下山不知所踪！`);
         this.log(`${d.name} 忠诚度归零，叛逃出宗。`, "bad");
       }
@@ -572,7 +638,9 @@ const Game = {
       heir.isLeader = true;
       heir.inBranch = false; heir.adventure = null;
       s.caravans.forEach(c => { if (c.escortId === heir.id) c.escortId = null; });
+      if (s.branch) s.branch.disciples = s.branch.disciples.filter(id => id !== heir.id);
       s.generation++;
+      this.recordDisciple(heir, "succession", `继任第 ${s.generation} 代掌门。`);
       this.log(`【传承】${heir.name} 继任第 ${s.generation} 代掌门，肩负宗门兴衰。`, "good");
     }
   },
@@ -686,12 +754,15 @@ const Game = {
       out.push("处置公允，全宗忠诚度 +4。");
     }
     if (ef.expedition) {
-      const d = this.strongestDisciple();
+      const d = this.aliveDisciples().filter(x => this.available(x)).sort((a, b) => this.disciplePower(b) - this.disciplePower(a))[0];
       if (!d) out.push("门中无人可派，只得作罢。");
       else {
         const win = Math.random() < clamp(0.3 + this.disciplePower(d) / 500, 0.2, 0.85);
         if (win) { this.gainRes({ lingshi: 180, lingyao: 15 }); out.push(`${d.name} 秘境夺宝而归！灵石+180、灵药+15！`); }
-        else { d.injuredMonths = 4; out.push(`${d.name} 在秘境中不敌他宗修士，重伤而归……`); }
+        else {
+          const fate = this.resolveCombatCasualty(d, 4, "秘境争夺中不敌他宗修士");
+          out.push(fate === "deceased" ? `${d.name} 陨落于秘境争夺……` : `${d.name} 在秘境中不敌他宗修士，重伤而归……`);
+        }
       }
     }
     if (ef.relRandom) {
@@ -736,10 +807,11 @@ const Game = {
     if (ef.beastFight) {
       if (this.sectPower() > 150) { this.gainRes({ lingyao: 10 }); out.push("众弟子击退兽潮，缴获妖兽灵药×10！"); }
       else {
-        const d = this.randomAliveDisciple();
-        if (d) d.injuredMonths = 3;
+        const defenders = this.aliveDisciples().filter(x => this.atHome(x));
+        const d = defenders[rnd(defenders.length)];
+        const fate = d ? this.resolveCombatCasualty(d, 3, "抵御兽潮时遭强敌围攻") : "unharmed";
         s.resources.lingyao = Math.max(0, s.resources.lingyao - 10);
-        out.push("苦战方退兽潮，灵田受损（灵药-10），有弟子受伤。");
+        out.push(`苦战方退兽潮，灵田受损（灵药-10），${d ? `${d.name}${fate === "deceased" ? "陨落" : "重伤"}` : "无人伤亡"}。`);
       }
     }
     if (ef.haltDanfang) { s.danfangHaltMonths = 1; out.push("丹房停产一月。"); }
@@ -806,35 +878,48 @@ const Game = {
     const ratio = atk / Math.max(1, def);
     const winRate = clamp(0.1 + ratio * 0.5 + tactic.winMod, 0.05, 0.95);
     const win = Math.random() < winRate;
+    used.forEach(id => {
+      const d = s.disciples.find(x => x.id === id);
+      this.recordDisciple(d, "battle", `参与攻打【${sect.name}】，${win ? "我方获胜" : "我方战败"}。`);
+    });
     // 战损：随机出战弟子受伤
     const lossCount = Math.max(1, Math.round(used.size * (win ? 0.2 : 0.5) * tactic.lossMod));
     const injured = [];
+    const fallen = [];
     const ids = [...used];
     for (let i = 0; i < lossCount && ids.length; i++) {
       const id = ids.splice(rnd(ids.length), 1)[0];
       const d = s.disciples.find(x => x.id === id);
-      d.injuredMonths = win ? 3 : 8;
-      injured.push(d.name);
+      let fate;
+      if (!win || def > atk) fate = this.resolveCombatCasualty(d, win ? 3 : 8, `攻打【${sect.name}】${win ? "时遭强敌反击" : "战败"}`);
+      else {
+        d.injuredMonths = 3;
+        this.recordDisciple(d, "injured", `攻打【${sect.name}】获胜后负伤，休养 3 个月。`);
+        fate = "injured";
+      }
+      if (fate === "deceased") fallen.push(d.name);
+      else injured.push(d.name);
     }
     if (win) {
-      sect.broken = true; // 山门被破，等待战后处置
-      this.log(`【大战】我军攻破【${sect.name}】山门！护山大阵已毁，等待战后处置。`, "good");
-      return { ok: true, win: true, atk, def, injured,
-        msg: `攻破【${sect.name}】山门！\n我方战力 ${atk} vs 守方（含大阵）${def}\n伤者：${injured.join("、")}\n\n请选择战后处置方式。`,
-        needPostWar: true };
+      sect.broken = !s.gameOver; // 全宗陨落时不能通过战后招降复活。
+      this.log(`【大战】我军攻破【${sect.name}】山门！重伤：${injured.join("、") || "无"}；陨落：${fallen.join("、") || "无"}。${s.gameOver ? "门中已无人归来，道统断绝。" : "等待战后处置。"}`, s.gameOver ? "bad" : "good");
+      return { ok: true, win: true, atk, def, injured, fallen,
+        msg: `攻破【${sect.name}】山门！\n我方战力 ${atk} vs 守方（含大阵）${def}\n重伤：${injured.join("、") || "无"}\n陨落：${fallen.join("、") || "无"}\n\n${s.gameOver ? "门中无人归来，道统断绝；可在弟子页查阅生平。" : "请选择战后处置方式。"}`,
+        needPostWar: !s.gameOver };
     }
     const loss = Math.round(s.resources.lingshi * 0.15);
     s.resources.lingshi -= loss;
     sect.relation = Math.max(-100, sect.relation - 20);
     if (tacticId === "incite") s.reputation -= 10;
     if (tacticId === "raid") s.resources.lingshi = Math.max(0, s.resources.lingshi - 80);
-    this.log(`【大败】攻打【${sect.name}】失利，折损灵石×${loss}，${injured.join("、")}重伤。`, "bad");
-    return { ok: true, win: false, atk, def, injured,
-      msg: `攻城失利！\n我方战力 ${atk} vs 守方（含大阵）${def}\n损失灵石×${loss}，${injured.join("、")}重伤。${tacticId === "incite" ? "\n内应暴露，声望 -10！" : ""}` };
+    this.log(`【大败】攻打【${sect.name}】失利，折损灵石×${loss}，重伤：${injured.join("、") || "无"}；陨落：${fallen.join("、") || "无"}。`, "bad");
+    return { ok: true, win: false, atk, def, injured, fallen,
+      msg: `攻城失利！\n我方战力 ${atk} vs 守方（含大阵）${def}\n损失灵石×${loss}，重伤：${injured.join("、") || "无"}；陨落：${fallen.join("、") || "无"}。${tacticId === "incite" ? "\n内应暴露，声望 -10！" : ""}` };
   },
   // 战后三选一
   postWar(sectId, choice) {
     const s = this.state;
+    if (s.gameOver) return { err: "宗门已覆灭，无法处理战果" };
     const sect = s.sects.find(x => x.id === sectId);
     if (!sect || !sect.broken) return { err: "该宗门山门未破" };
     if (!["destroy", "vassal", "merge"].includes(choice)) return { err: "无效的处置方式" };
@@ -932,6 +1017,7 @@ const Game = {
     s.resources.lingshi -= cost;
     s.caravans.push({ routeId, goodsId, amount, escortId, cost, monthsLeft: route.months });
     this.log(`商队出发：【${route.name}】，贩运${goods.name}×${amount}（货款灵石×${cost}），${route.months} 个月后归返。`);
+    if (escortId) this.recordDisciple(s.disciples.find(d => d.id === escortId), "caravan", `护送前往【${route.name}】的商队。`);
     return { ok: true };
   },
   caravanTick(msgs) {
@@ -950,8 +1036,8 @@ const Game = {
       if (Math.random() < risk) {
         // 被劫
         const esc = c.escortId ? s.disciples.find(d => d.id === c.escortId) : null;
-        if (esc) { esc.injuredMonths = 4; }
-        msgs.push(`【商队遇劫】前往【${route.name}】的商队被劫！货款血本无归${esc ? "，" + esc.name + " 重伤" : ""}。`);
+        if (esc) { esc.injuredMonths = 4; this.recordDisciple(esc, "injured", `商队在【${route.name}】遇劫，重伤 4 个月。`); }
+        msgs.push(`【商队遇劫】前往【${route.name}】的商队被劫！货款血本无归${esc ? `，${esc.name} 重伤` : ""}。`);
         this.log(`商队在【${route.name}】遇劫，损失惨重。`, "bad");
       } else {
         const profit = Math.round(route.profit * (1 + c.amount / 10));
@@ -973,6 +1059,7 @@ const Game = {
     if (d.adventure) return { err: "该弟子已在外历练" };
     if (this.hasJob(d)) return { err: "请先解除该弟子的岗位" };
     d.adventure = { placeId, monthsLeft: place.months };
+    this.recordDisciple(d, "adventure", `前往【${place.name}】历练，预计 ${place.months} 个月后归来。`);
     this.log(`${d.name} 下山前往【${place.name}】历练，${place.months} 个月后归来。`);
     return { ok: true };
   },
@@ -985,6 +1072,8 @@ const Game = {
       if (d.adventure.monthsLeft <= 0) {
         const placeId = d.adventure.placeId;
         d.adventure = null;
+        const place = ADVENTURE_PLACES.find(p => p.id === placeId);
+        this.recordDisciple(d, "adventure_return", `完成【${place ? place.name : placeId}】历练归来，等待处理途中遭遇。`);
         // 抽取该地点的历练事件
         const pool = ADV_EVENTS.filter(e => e.places.includes(placeId));
         if (pool.length) returned.push({ d, ev: pool[rnd(pool.length)] });
@@ -1009,7 +1098,10 @@ const Game = {
     if (ef.comprehension) { d.comprehension = clamp(d.comprehension + ef.comprehension, 0, 99); out.push(`悟性 +${ef.comprehension}`); }
     if (ef.advGamble) {
       if (Math.random() < ef.advGamble.rate) { this.gainRes(ef.advGamble.win); out.push("得手！" + Object.entries(ef.advGamble.win).map(([k, v]) => `${RESOURCES[k].name}+${v}`).join("，")); }
-      else { d.injuredMonths = 4; out.push("妖蟒暴起伤人，重伤而归……"); }
+      else {
+        const fate = this.resolveCombatCasualty(d, 4, "秘境中遭妖蟒袭击");
+        out.push(fate === "deceased" ? `${d.name} 陨落于妖蟒之口……` : "妖蟒暴起伤人，重伤而归……");
+      }
     }
     if (ef.sageGamble) {
       if (Math.random() < 0.5) { d.comprehension = Math.min(99, d.comprehension + 8); out.push("老丐竟是隐世高人，一语点醒梦中人，悟性 +8！"); }
@@ -1017,7 +1109,10 @@ const Game = {
     }
     if (ef.justiceFight) {
       if (this.disciplePower(d) > 60) { s.reputation += 5; this.gainRes({ lingshi: 100 }); out.push("击退魔修！散修感激赠礼灵石×100，声望 +5。"); }
-      else { d.injuredMonths = 3; out.push("寡不敌众，负伤遁走……"); }
+      else {
+        const fate = this.resolveCombatCasualty(d, 3, "出手救人时遭魔修围攻");
+        out.push(fate === "deceased" ? `${d.name} 陨落于魔修围攻……` : "寡不敌众，负伤遁走……");
+      }
     }
     if (ef.legacyExp) {
       this.addExp(d, stageExpNeed(d.realm, d.stage) * 0.5);
@@ -1029,7 +1124,10 @@ const Game = {
     }
     if (ef.beastDuel) {
       if (this.disciplePower(d) > 50) { this.gainRes({ lingyao: 10 }); s.reputation += 2; out.push("斩杀妖狼，得灵药×10，声望 +2！"); }
-      else { d.injuredMonths = 4; out.push("不敌妖狼，拼死逃脱，重伤四个月。"); }
+      else {
+        const fate = this.resolveCombatCasualty(d, 4, "与妖狼搏斗时不敌");
+        out.push(fate === "deceased" ? `${d.name} 陨落于妖狼之口……` : "不敌妖狼，拼死逃脱，重伤四个月。");
+      }
     }
     if (ef.flee) {
       if (s.resources.danyao >= 1) { s.resources.danyao--; out.push("激发遁符，有惊无险。（丹药-1）"); }
@@ -1042,6 +1140,7 @@ const Game = {
       out.push("结为道侣之约：悟性 +3、忠诚 +10。");
     }
     this.log(`【历练】${d.name}·${ev.title}：${opt.label} → ${out.join("；") || "平安归来"}`);
+    this.recordDisciple(d, "adventure_event", `${ev.title}：${opt.label}。${out.join("；") || "平安归来"}`);
     return { ok: true, msg: out.join("\n") || `${d.name} 平安归来。` };
   },
 
@@ -1070,8 +1169,19 @@ const Game = {
         if (version < 3 && Number.isInteger(d.root)) d.root = migrateSpiritRoot(d.root, d.id);
         if (!Number.isInteger(d.id) || ids.has(d.id) || !REALMS[d.realm] || !STAGES[d.stage] ||
             !validSpiritRoot(d.root) || !CLASSES[d.cls] || !Number.isFinite(d.exp) || !Number.isFinite(d.lifespanLeft) ||
-            ![d.age, d.comprehension, d.luck, d.loyalty].every(Number.isFinite) || typeof d.name !== "string") return false;
+            ![d.age, d.comprehension, d.luck, d.loyalty].every(Number.isFinite) || typeof d.name !== "string" || typeof d.alive !== "boolean") return false;
         ids.add(d.id);
+        if (d.status === undefined) d.status = d.alive ? "active" : d.ascended ? "ascended" : "unknown";
+        if (!["active", "deceased", "expelled", "departed", "ascended", "unknown"].includes(d.status) || d.alive !== (d.status === "active")) return false;
+        if (d.biography === undefined) d.biography = [{ date: "旧档", age: Math.floor(d.age), realm: d.realm, stage: d.stage,
+          kind: "legacy", text: "旧存档未保存完整生平，无法恢复此前经历。" }];
+        if (!Array.isArray(d.biography) || d.biography.some(e => !e || typeof e.date !== "string" ||
+            typeof e.kind !== "string" || typeof e.text !== "string" || !Number.isFinite(e.age) || !REALMS[e.realm] || !STAGES[e.stage])) return false;
+        if (!d.alive && d.exitReason !== undefined && typeof d.exitReason !== "string") return false;
+        if (d.finalPower !== undefined && (!Number.isFinite(d.finalPower) || d.finalPower < 0)) return false;
+        if (d.exitTime !== undefined && (!d.exitTime || !Number.isInteger(d.exitTime.year) || d.exitTime.year < 1 ||
+            !Number.isInteger(d.exitTime.month) || d.exitTime.month < 1 || d.exitTime.month > 12)) return false;
+        if (!d.alive && !d.exitReason && d.status === "ascended") d.exitReason = "旧存档记载该弟子已飞升。";
         if (d.avatarId !== undefined && !/^(?:[mf][1-4]|m4_legacy)$/.test(d.avatarId)) return false;
         // 历史存档仍用旧 m4 立绘；新生成的弟子使用更新后的年轻版。
         if (!d.avatarId) {
@@ -1115,6 +1225,8 @@ const Game = {
             !Array.isArray(d.tribulation.guardians) || d.tribulation.guardians.length > DUJIE.maxGuardian || new Set(d.tribulation.guardians).size !== d.tribulation.guardians.length ||
             d.tribulation.guardians.some(id => !s.disciples.some(g => g.id === id && g.alive && g.realm >= 6)))) return false;
       }
+      if (s.branch) s.branch.disciples = s.branch.disciples.filter(id => s.disciples.some(d => d.id === id && d.alive && d.inBranch));
+      s.caravans.forEach(c => { if (c.escortId && !s.disciples.some(d => d.id === c.escortId && d.alive)) c.escortId = null; });
       const employed = new Set();
       for (const [key, list] of Object.entries(s.jobs)) {
         if (!BUILDINGS[key] || !s.buildings[key] || !Array.isArray(list)) { delete s.jobs[key]; continue; }
@@ -1197,6 +1309,8 @@ Object.assign(Game, {
     d.loyalty = KEQING.loyaltyInit;
     d.age = ri(60, Math.min(300, REALMS[realm].lifespan - 20));
     d.lifespanLeft = REALMS[realm].lifespan - d.age;
+    d.biography = [];
+    this.recordDisciple(d, "joined", "以客卿身份挂单入宗，领取宗门俸禄。");
     s.disciples.push(d);
     this.log(`散修高手 ${d.name}（${REALMS[realm].name}期）挂单入宗为客卿，月俸灵石×${KEQING.salaryBase[realm]}。`, "good");
     return { ok: true, d };
@@ -1211,7 +1325,7 @@ Object.assign(Game, {
         d.loyalty = clamp(d.loyalty + 1, 0, 100); // 供奉到位，缓慢归心
       } else {
         // 发不起俸禄，客卿离去
-        this.removeDisciple(d, false);
+        this.removeDisciple(d, false, "departed", "未能支付客卿俸禄，离开宗门。");
         msgs.push(`【客卿离去】拖欠俸禄，客卿 ${d.name} 拂袖而去。`);
         this.log(`客卿 ${d.name} 因俸禄被拖欠而离宗。`, "bad");
       }
@@ -1227,6 +1341,7 @@ Object.assign(Game, {
     if (d.isElder) return { err: "已是长老" };
     if (this.elders().length >= ELDER.maxSeats) return { err: "长老院席位已满" };
     d.isElder = true;
+    this.recordDisciple(d, "elder", `受封长老，执掌${ELDER.domainName[ELDER.seatDomain[d.cls]]}。`);
     this.log(`${d.name} 受封长老，执掌${ELDER.domainName[ELDER.seatDomain[d.cls]]}。`, "good");
     return { ok: true };
   },
@@ -1319,7 +1434,8 @@ Object.assign(Game, {
         this.addExp(heir, stageExpNeed(heir.realm, heir.stage) * 0.5);
         heir.comprehension = Math.min(99, heir.comprehension + 3);
         this.addHeritage(HERITAGE.sources.legacyCave, `${d.name}留下传承洞府`);
-        this.log(`【传承】${d.name} 坐化前留下传承洞府，${heir.name} 入内参悟，修为悟性大进！`, "good");
+        this.recordDisciple(heir, "legacy", `参悟 ${d.name} 留下的传承洞府，修为与悟性有所提升。`);
+        this.log(`【传承】${d.name} 生前留下的传承洞府重现，${heir.name} 入内参悟，修为悟性大进！`, "good");
         return heir.name;
       }
     }
@@ -1383,13 +1499,16 @@ Object.assign(Game, {
   // 联盟讨伐魔道
   allianceRaid() {
     const s = this.state;
+    if (s.gameOver) return { err: "宗门已覆灭" };
     if (!s.alliance) return { err: "尚未建立联盟" };
     if (s.alliance.raidCd > 0) return { err: `讨伐冷却中（${s.alliance.raidCd} 个月）` };
+    const fighters = this.aliveDisciples().filter(d => this.available(d));
+    if (!fighters.length) return { err: "没有可出战弟子" };
     const allyPower = s.alliance.members.reduce((sum, id) => {
       const sec = s.sects.find(x => x.id === id);
       return sum + (sec && sec.allied && !sec.destroyed && !sec.broken ? Math.round(sec.power * 0.5) : 0);
     }, 0);
-    const total = this.sectPower() + allyPower;
+    const total = fighters.reduce((sum, d) => sum + this.disciplePower(d), 0) + allyPower;
     const enemy = ALLIANCE_CFG.modaoBase + s.year * 30; // 魔道逐年变强
     const winRate = clamp(0.15 + (total / enemy) * 0.5, 0.05, 0.9);
     const win = Math.random() < winRate;
@@ -1404,11 +1523,12 @@ Object.assign(Game, {
       this.log(`【联盟大捷】${s.alliance.name}讨伐魔道凯旋！缴获丰厚，声威震于四野。`, "good");
       return { ok: true, win: true, msg: `联盟军（战力 ${total}）大破魔道（战力 ${enemy}）！\n缴获：灵石×${loot.lingshi}、丹药×${loot.danyao}\n声望 +10、联盟威望 +10、底蕴 +${HERITAGE.sources.allianceWin}、气运 +${QIYUN.sources.warWin}` };
     }
-    const victim = this.randomAliveDisciple();
-    if (victim) victim.injuredMonths = 6;
+    const victim = fighters[rnd(fighters.length)];
+    const casualty = victim ? this.resolveCombatCasualty(victim, 6, "联盟讨伐魔道失利") : "unharmed";
     s.alliance.prestige = Math.max(0, s.alliance.prestige - 8);
-    this.log(`【联盟失利】讨伐魔道受挫，${victim ? victim.name + " 重伤，" : ""}联盟威望受损。`, "bad");
-    return { ok: true, win: false, msg: `讨伐失利！魔道战力 ${enemy} 超出预估，联盟军折戟而归。\n${victim ? victim.name + " 重伤六个月，" : ""}联盟威望 -8。` };
+    const fate = victim ? `${victim.name}${casualty === "deceased" ? "陨落" : "重伤六个月"}` : "";
+    this.log(`【联盟失利】讨伐魔道受挫，${fate ? fate + "，" : ""}联盟威望受损。`, "bad");
+    return { ok: true, win: false, msg: `讨伐失利！魔道战力 ${enemy} 超出预估，联盟军折戟而归。\n${fate ? fate + "，" : ""}联盟威望 -8。` };
   },
   allianceTick() {
     const s = this.state;
@@ -1488,7 +1608,7 @@ Object.assign(Game, {
       let msg = `第 ${wave} 道天雷落下，${d.name} 未能扛住——${penalty.text}！`;
       if (penalty.type === "injured") { d.realm = 7; d.stage = 0; d.exp = 0; d.injuredMonths = 36; }
       else if (penalty.type === "foundation") { d.foundationDmg = true; d.exp = 0; d.injuredMonths = 24; }
-      else { this.removeDisciple(d); }
+      else { this.removeDisciple(d, true, "deceased", `渡劫失败，陨落于第 ${wave} 道天雷。`); }
       this.log(`【渡劫失败】${d.name} 折戟于第 ${wave} 道天雷，${penalty.text}。`, "bad");
       this.autosave();
       return { ok: true, wave, passed: false, finished: true, success: false, msg };
@@ -1496,7 +1616,7 @@ Object.assign(Game, {
     if (wave >= DUJIE.waves) {
       // 飞升成功
       d.ascended = true;
-      this.removeDisciple(d, false);
+      this.removeDisciple(d, false, "ascended", "九霄天劫圆满，飞升仙界，留下本命传承福泽后人。");
       this.addHeritage(15, `${d.name} 飞升仙界`);
       this.addQiyun(8, "飞升祥瑞");
       s.reputation += 20;
@@ -1526,7 +1646,11 @@ Object.assign(Game, {
       return { err: "派驻弟子须健康、在宗、达到金丹期且不是掌门" };
     if (list.length < SPIRIT_BRANCH.minDisciple) return { err: `至少需 ${SPIRIT_BRANCH.minDisciple} 名金丹期以上健康弟子（掌门不可派驻）` };
     this.payCost(SPIRIT_BRANCH.establishCost);
-    list.forEach(d => { d.inBranch = true; this.removeFromJobs(d.id); });
+    list.forEach(d => {
+      d.inBranch = true;
+      this.removeFromJobs(d.id);
+      this.recordDisciple(d, "branch", "随宗门建立灵界分宗，跨界驻守。");
+    });
     s.branch = { disciples: list.map(d => d.id), spiritRep: 0 };
     s.spiritSects = JSON.parse(JSON.stringify(SPIRIT_SECTS));
     this.log(`【开疆】灵界分宗立！${list.map(d => d.name).join("、")} 共 ${list.length} 人跨界驻守。`, "good");
@@ -1610,9 +1734,10 @@ Object.assign(Game, {
         this.addQiyun(QIYUN.sources.warWin, "击退魔道");
         out.push("我军大破魔道联军！声望 +15、灵石 +500、气运 +" + QIYUN.sources.warWin);
       } else {
-        const injured = this.aliveDisciples().slice(0, 3);
-        injured.forEach(d => d.injuredMonths = 8);
-        out.push(`力有不逮，苦战退敌但伤亡惨重：${injured.map(d => d.name).join("、")} 重伤八月。`);
+        const casualties = this.aliveDisciples().filter(d => this.atHome(d)).slice(0, 3).map(d => ({ d, fate: this.resolveCombatCasualty(d, 8, "抵御魔道联军时战败") }));
+        const injured = casualties.filter(x => x.fate === "injured").map(x => x.d.name);
+        const fallen = casualties.filter(x => x.fate === "deceased").map(x => x.d.name);
+        out.push(`力有不逮，苦战退敌但伤亡惨重：重伤 ${injured.join("、") || "无"}；陨落 ${fallen.join("、") || "无"}。`);
       }
     }
     if (ef.ancientRun) {
@@ -1628,7 +1753,7 @@ Object.assign(Game, {
       const d = young[rnd(young.length)];
       if (d) {
         if (Math.random() < 0.2) {
-          this.removeDisciple(d);
+          this.removeDisciple(d, true, "deceased", "陨落于秘境深处。");
           out.push(`${d.name} 陨落于秘境深处……宗门上下扼腕。`);
         } else {
           d.comprehension = Math.min(99, d.comprehension + 5);
@@ -1649,10 +1774,11 @@ Object.assign(Game, {
         this.gainRes({ lingshi: 1000 });
         out.push("【青史留名】我宗率全界修士斩杀天魔！声望 +30、底蕴 +15、气运 +10、灵石×1000！");
       } else {
-        const injured = this.aliveDisciples().slice(0, 4);
-        injured.forEach(d => d.injuredMonths = 12);
+        const casualties = this.aliveDisciples().filter(d => this.atHome(d)).slice(0, 4).map(d => ({ d, fate: this.resolveCombatCasualty(d, 12, "天魔来袭时联军战败") }));
+        const injured = casualties.filter(x => x.fate === "injured").map(x => x.d.name);
+        const fallen = casualties.filter(x => x.fate === "deceased").map(x => x.d.name);
         s.reputation += 5;
-        out.push(`天魔凶威滔天，联军惨胜：${injured.map(d => d.name).join("、")} 重伤一年，声望 +5。`);
+        out.push(`天魔凶威滔天，联军惨胜：重伤 ${injured.join("、") || "无"}；陨落 ${fallen.join("、") || "无"}；声望 +5。`);
       }
     }
     this.log(`【大事件·${ev.title}】${ev.options[optIdx].label} → ${out.join("；") || "已处置"}`, ef.rep && ef.rep < 0 ? "bad" : "good");
