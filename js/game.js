@@ -17,7 +17,7 @@ const Game = {
     s.log = [];
     s.caravans = [];
     s.pendingEvents = [];
-    s.saveVersion = 2;
+    s.saveVersion = 3;
     s.chaos = 0;            // 宗门混乱度（提升负面事件概率）
     s.veinDamageMonths = 0; // 灵脉受损剩余月数
     s.insightBoostMonths = 0;
@@ -42,16 +42,14 @@ const Game = {
     const gender = Math.random() < 0.5 ? "男" : "女";
     const name = opts.name ||
       SURNAMES[rnd(SURNAMES.length)] + (gender === "男" ? GIVEN_M[rnd(GIVEN_M.length)] : GIVEN_F[rnd(GIVEN_F.length)]);
-    const rootIdx = opts.genius
-      ? weightedPick([2,2,2,2,2,15,15,15,40])
-      : weightedPick(ROOT_WEIGHTS);
+    const root = this.rollSpiritRoot(opts);
     const realm = opts.realm || 0;
     const age = opts.isLeader ? 45 : ri(15, 25);
     return {
       id: s ? s.nextId++ : 1,
       name, gender,
       realm, stage: 0, exp: 0,
-      root: rootIdx,
+      root, autoBreakthrough: true,
       personality: PERSONALITIES[rnd(PERSONALITIES.length)],
       cls: opts.cls || randomClass(),
       luck: ri(20, 90),
@@ -67,6 +65,24 @@ const Game = {
   },
 
   // ---------- 数值计算 ----------
+  recruitmentProfile(opts = {}) {
+    // 对数实力避免后期数值爆炸，声望与实力分别提供一半招贤分。
+    const power = this.sectPower();
+    const strength = clamp(Math.log10(1 + power / 100) / 3, 0, 1);
+    const reputation = clamp(this.state.reputation / 500, 0, 1);
+    let quality = clamp((strength + reputation) / 2 + (opts.method === "travel" ? ROOT_RECRUIT.travelBonus : 0), 0, 1);
+    if (opts.genius) quality = Math.max(quality, ROOT_RECRUIT.geniusFloor);
+    const weights = ROOT_RECRUIT.low.map((w, i) => w + (ROOT_RECRUIT.high[i] - w) * quality);
+    return { power, quality, weights, excellentChance: weights[4] + weights[5] };
+  },
+  rollSpiritRoot(opts = {}) {
+    const kind = ROOT_RECRUIT.kinds[weightedPick(this.recruitmentProfile(opts).weights)];
+    if (kind === "mutant") return { kind: "mutant", elements: [ROOT_MUTATIONS[rnd(ROOT_MUTATIONS.length)]] };
+    // 有限次数洗牌，固定随机数测试或极端随机源也不会死循环。
+    const elements = ROOT_ELEMENTS.slice();
+    for (let i = elements.length - 1; i > 0; i--) { const j = rnd(i + 1); [elements[i], elements[j]] = [elements[j], elements[i]]; }
+    return { kind: "normal", elements: elements.slice(0, kind).sort((a, b) => ROOT_ELEMENTS.indexOf(a) - ROOT_ELEMENTS.indexOf(b)) };
+  },
   disciplePower(d) {
     const base = REALMS[d.realm].powerBase * (1 + d.stage * 0.25);
     return Math.round(base * CLASSES[d.cls].combat * (1 + d.comprehension / 200) * (1 + this.elderBonus("war")));
@@ -82,7 +98,7 @@ const Game = {
   aliveDisciples() { return this.state.disciples.filter(d => d.alive); },
   cultivateSpeed(d) {
     const s = this.state;
-    const root = SPIRIT_ROOTS[d.root].speed;
+    const root = spiritRootInfo(d.root).speed;
     const yanwu = this.cultivating(d) ? (s.buildings.yanwu || 0) * 0.15 : 0;
     const cangjing = (s.buildings.cangjing || 0) * 0.08;
     const insight = s.insightBoostMonths > 0 ? 0.10 : 0;
@@ -210,7 +226,7 @@ const Game = {
     const n = ri(cfg.count[0], cfg.count[1]);
     const list = [];
     for (let i = 0; i < n && this.aliveDisciples().length < this.capacity(); i++) {
-      const d = this.makeDisciple({ realm: 0 });
+      const d = this.makeDisciple({ realm: 0, method });
       if (method === "travel") d.comprehension = Math.min(99, d.comprehension + 15);
       s.disciples.push(d);
       list.push(d);
@@ -220,6 +236,49 @@ const Game = {
   },
 
   // ---------- 突破 ----------
+  setAutoBreakthrough(settings) {
+    if (!settings || typeof settings.monthly !== "boolean" || !Object.hasOwn(AUTO_BREAKTHROUGH, settings.strategy) ||
+        !Number.isInteger(settings.pills) || settings.pills < 1 || settings.pills > BREAKTHROUGH.maxPill) return { err: "自动突破设置无效" };
+    this.state.autoBreakthrough = { monthly: settings.monthly, strategy: settings.strategy, pills: settings.pills };
+    return { ok: true };
+  },
+  setDiscipleAutoBreakthrough(id, enabled) {
+    const d = this.state.disciples.find(x => x.id === id && x.alive);
+    if (!d || typeof enabled !== "boolean") return { err: "弟子或自动突破开关无效" };
+    d.autoBreakthrough = enabled;
+    return { ok: true };
+  },
+  autoBreakthroughError() {
+    const s = this.state;
+    if (s.gameOver) return "宗门已覆灭";
+    if ((s.pendingEvents || []).length) return "请先处理本月事件";
+    if (s.sects.some(sec => sec.broken)) return "请先完成战后处置";
+    if (this.aliveDisciples().some(d => d.tribulation)) return "请先完成渡劫";
+    return null;
+  },
+  runAutoBreakthrough() {
+    const err = this.autoBreakthroughError();
+    if (err) return { err };
+    const cfg = this.state.autoBreakthrough;
+    const report = { attempted: 0, succeeded: 0, failed: 0, waiting: 0, skipped: 0, pillsUsed: 0, results: [] };
+    // 固定按 ID 依次处理，每位弟子每轮最多一次，复用手动突破的全部风险与继位流程。
+    const ids = this.aliveDisciples().map(d => d.id).sort((a, b) => a - b);
+    ids.forEach(id => {
+      const d = this.state.disciples.find(x => x.id === id);
+      if (!d.autoBreakthrough || this.canBreakthrough(d).err) { report.skipped++; return; }
+      if (cfg.strategy === "wait" && this.state.resources.danyao < cfg.pills) {
+        report.waiting++; report.results.push(`${d.name}：等待丹药（需 ${cfg.pills} 颗）`); return;
+      }
+      const pills = cfg.strategy === "direct" ? 0 : Math.min(cfg.pills, Math.floor(this.state.resources.danyao));
+      const r = this.tryBreakthrough(id, pills, []);
+      if (r.err) { report.skipped++; return; }
+      report.attempted++; report.pillsUsed += pills;
+      if (r.ok) report.succeeded++; else report.failed++;
+      report.results.push(`${d.name}：${r.ok ? `突破至${REALMS[d.realm].name}${STAGES[d.stage]}` : r.msg}（丹药 ${pills} 颗）`);
+    });
+    this.log(`【自动突破】尝试 ${report.attempted} 人，成功 ${report.succeeded} 人，失败 ${report.failed} 人，等丹 ${report.waiting} 人，耗丹 ${report.pillsUsed} 颗。`);
+    return report;
+  },
   breakthroughInfo(d) {
     // 返回是否为大境界突破、成功率构成
     const isMajor = d.stage === 3;
@@ -410,6 +469,12 @@ const Game = {
 
     // 2. 在宗弟子正常修炼，生产岗位半速兼修；外出与重伤期间暂停。
     this.aliveDisciples().forEach(d => this.addExp(d, this.cultivationGain(d)));
+    if (s.autoBreakthrough.monthly) {
+      const report = this.runAutoBreakthrough();
+      if (report.attempted || report.waiting) {
+        msgs.push(`【自动突破】成功 ${report.succeeded} 人，失败 ${report.failed} 人，等丹 ${report.waiting} 人，耗丹 ${report.pillsUsed} 颗。`, ...report.results);
+      }
+    }
 
     // 3. 贸易收益
     s.sects.forEach(sec => {
@@ -583,7 +648,7 @@ const Game = {
       else if (Math.random() < 0.7) {
         const d = this.makeDisciple({ genius: Math.random() < 0.3 });
         s.disciples.push(d);
-        out.push(`伤者${d.name}（${SPIRIT_ROOTS[d.root].name}）感恩戴德，拜入山门！`);
+        out.push(`伤者${d.name}（${spiritRootInfo(d.root).name}）感恩戴德，拜入山门！`);
       } else out.push("那人竟是骗子，伤好后卷了些许灵药逃走了……");
     }
     if (ef.gamble) {
@@ -664,7 +729,7 @@ const Game = {
         const d = this.makeDisciple({ genius: true });
         s.disciples.push(d);
         if (this.addQiyun) this.addQiyun(QIYUN.sources.genius, "天才弟子入门");
-        out.push(`天才弟子 ${d.name}（${SPIRIT_ROOTS[d.root].name}，悟性${d.comprehension}）拜入山门！`);
+        out.push(`天才弟子 ${d.name}（${spiritRootInfo(d.root).name}，悟性${d.comprehension}）拜入山门！`);
       } else out.push("弟子居已满，错失良才……");
     }
     if (ef.beastFight) {
@@ -983,7 +1048,7 @@ const Game = {
   saveKey(slot) { return `zm_cql_save_${slot}`; },
   save(slot) {
     try {
-      this.state.saveVersion = 2;
+      this.state.saveVersion = 3;
       localStorage.setItem(this.saveKey(slot), JSON.stringify(this.state));
       return true;
     } catch (e) { return false; }
@@ -997,9 +1062,13 @@ const Game = {
           !parsed.resources || !parsed.buildings || !Number.isInteger(parsed.year) || parsed.year < 1 ||
           !Number.isInteger(parsed.month) || parsed.month < 1 || parsed.month > 12) return false;
       const ids = new Set();
+      const version = parsed.saveVersion ?? 1;
+      if (!Number.isInteger(version) || version < 1 || version > 3) return false;
       for (const d of parsed.disciples) {
+        if (!d) return false;
+        if (version < 3 && Number.isInteger(d.root)) d.root = migrateSpiritRoot(d.root, d.id);
         if (!Number.isInteger(d.id) || ids.has(d.id) || !REALMS[d.realm] || !STAGES[d.stage] ||
-            !SPIRIT_ROOTS[d.root] || !CLASSES[d.cls] || !Number.isFinite(d.exp) || !Number.isFinite(d.lifespanLeft) ||
+            !validSpiritRoot(d.root) || !CLASSES[d.cls] || !Number.isFinite(d.exp) || !Number.isFinite(d.lifespanLeft) ||
             ![d.age, d.comprehension, d.luck, d.loyalty].every(Number.isFinite) || typeof d.name !== "string") return false;
         ids.add(d.id);
       }
@@ -1007,6 +1076,12 @@ const Game = {
       for (const [key, lv] of Object.entries(parsed.buildings)) if (!BUILDINGS[key] || !Number.isInteger(lv) || lv < 0 || lv > BUILDINGS[key].maxLv) return false;
       const s = Object.assign(JSON.parse(JSON.stringify(INITIAL_STATE)), { jobs: {}, caravans: [], log: [], generation: 1,
         chaos: 0, veinDamageMonths: 0, insightBoostMonths: 0, pendingEvents: [] }, parsed);
+      const auto = s.autoBreakthrough || {};
+      const autoValid = typeof auto.monthly === "boolean" && Object.hasOwn(AUTO_BREAKTHROUGH, auto.strategy) &&
+        Number.isInteger(auto.pills) && auto.pills >= 1 && auto.pills <= BREAKTHROUGH.maxPill;
+      s.autoBreakthrough = { monthly: autoValid && auto.monthly, strategy: Object.hasOwn(AUTO_BREAKTHROUGH, auto.strategy) ? auto.strategy : "direct",
+        pills: Number.isInteger(auto.pills) && auto.pills >= 1 && auto.pills <= BREAKTHROUGH.maxPill ? auto.pills : 1 };
+      s.saveVersion = 3;
       s.nextId = Math.max(s.nextId || 1, ...s.disciples.map(d => d.id + 1));
       s.jobs = s.jobs && typeof s.jobs === "object" ? s.jobs : {};
       s.caravans = Array.isArray(s.caravans) ? s.caravans.filter(c => c && TRADE_ROUTES.some(r => r.id === c.routeId && r.goods.includes(c.goodsId)) && TRADE_GOODS[c.goodsId] && Number.isInteger(c.amount) && c.amount > 0 && Number.isFinite(c.monthsLeft)) : [];
@@ -1020,6 +1095,8 @@ const Game = {
       if (s.branch && !Array.isArray(s.branch.disciples)) return false;
       if (s.branch && !Array.isArray(s.spiritSects)) s.spiritSects = JSON.parse(JSON.stringify(SPIRIT_SECTS));
       for (const d of s.disciples) {
+        d.autoBreakthrough = typeof d.autoBreakthrough === "boolean" ? d.autoBreakthrough : true;
+        if (d.root.kind === "normal") d.root.elements.sort((a, b) => ROOT_ELEMENTS.indexOf(a) - ROOT_ELEMENTS.indexOf(b));
         // 旧版本可通过普通突破误入渡劫境，修正为待渡劫的大乘圆满。
         if (d.alive && d.realm === 8) { d.realm = 7; d.stage = 3; d.exp = stageExpNeed(7, 3); }
         d.exp = clamp(d.exp, 0, stageExpNeed(d.realm, d.stage));

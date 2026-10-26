@@ -1,8 +1,8 @@
 {
   "name": "zongmen-changqinglu",
   "productName": "宗门长青录",
-  "version": "1.1.2",
-  "description": "传统仙侠宗门经营模拟游戏（v1.1.2 核心流程与存档修复版）",
+  "version": "1.2.0",
+  "description": "传统仙侠宗门经营模拟游戏（v1.2.0 自动突破与灵根重构版）",
   "license": "MIT",
   "main": "main.js",
   "scripts": {

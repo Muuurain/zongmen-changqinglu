@@ -20,20 +20,42 @@ function stageExpNeed(realmIdx, stage) {
   return Math.round(20 * Math.pow(3.2, realmIdx) * (1 + stage * 0.6));
 }
 
-// ---- 灵根 ----
-const SPIRIT_ROOTS = [
-  { name: "金灵根", type: "normal", speed: 1.0 },
-  { name: "木灵根", type: "normal", speed: 1.0 },
-  { name: "水灵根", type: "normal", speed: 1.0 },
-  { name: "火灵根", type: "normal", speed: 1.0 },
-  { name: "土灵根", type: "normal", speed: 1.0 },
-  { name: "变异·雷灵根", type: "mutant", speed: 1.35 },
-  { name: "变异·冰灵根", type: "mutant", speed: 1.35 },
-  { name: "变异·风灵根", type: "mutant", speed: 1.35 },
-  { name: "天灵根", type: "heaven", speed: 1.8 }
-];
-// 招募时灵根权重
-const ROOT_WEIGHTS = [16, 16, 16, 16, 16, 6, 6, 6, 2];
+// ---- 灵根：单属性为天灵根，二/三为真灵根，四/五为伪灵根 ----
+const ROOT_ELEMENTS = ["金", "木", "水", "火", "土"];
+const ROOT_MUTATIONS = ["雷", "冰", "风"];
+const ROOT_SPEEDS = [0, 1.8, 1.35, 1.0, 0.75, 0.55];
+const ROOT_RECRUIT = {
+  // 从五灵根到天灵根/异灵根，随招贤分提高向高资质倾斜。总权重均为100。
+  low: [38, 30, 20, 9, 2, 1],
+  high: [5, 10, 22, 33, 20, 10],
+  kinds: [5, 4, 3, 2, 1, "mutant"],
+  geniusFloor: 0.85, travelBonus: 0.12
+};
+function validSpiritRoot(root) {
+  if (!root || !Array.isArray(root.elements) || !root.elements.length || new Set(root.elements).size !== root.elements.length) return false;
+  return root.kind === "mutant"
+    ? root.elements.length === 1 && ROOT_MUTATIONS.includes(root.elements[0])
+    : root.kind === "normal" && root.elements.length <= 5 && root.elements.every(e => ROOT_ELEMENTS.includes(e));
+}
+function spiritRootInfo(root) {
+  const count = root.elements.length;
+  const names = ["", "天灵根", "双灵根", "三灵根", "四灵根", "五灵根"];
+  return root.kind === "mutant"
+    ? { name: `${root.elements[0]}异灵根`, speed: 1.9, count: 1, grade: "异灵根" }
+    : { name: `${root.elements.join("")}${names[count]}`, speed: ROOT_SPEEDS[count], count, grade: count === 1 ? "天灵根" : count <= 3 ? "真灵根" : "伪灵根" };
+}
+// v1/v2 数字灵根只在迁移时使用；确定性映射，反复读档不会重抽。
+function migrateSpiritRoot(index, id) {
+  if (!Number.isInteger(index) || index < 0 || index > 8) return null;
+  if (index >= 5 && index <= 7) return { kind: "mutant", elements: [ROOT_MUTATIONS[index - 5]] };
+  if (index === 8) return { kind: "normal", elements: [ROOT_ELEMENTS[((id % 5) + 5) % 5]] };
+  return { kind: "normal", elements: [ROOT_ELEMENTS[index], ROOT_ELEMENTS[(index + 1) % 5], ROOT_ELEMENTS[(index + 2) % 5]].sort((a, b) => ROOT_ELEMENTS.indexOf(a) - ROOT_ELEMENTS.indexOf(b)) };
+}
+const AUTO_BREAKTHROUGH = {
+  direct: { name: "直接突破", desc: "不消耗丹药" },
+  pills: { name: "自动服丹", desc: "最多使用设定数量；库存不足时按现有数量使用，无丹也突破" },
+  wait: { name: "等丹再突破", desc: "库存达到设定数量才突破；不足则等待下次执行" }
+};
 
 // ---- 心性 ----
 const PERSONALITIES = ["沉稳", "急躁", "仁善", "邪异", "坚毅", "圆滑"];
@@ -142,6 +164,7 @@ const INITIAL_STATE = {
   sectName: "青云观",
   year: 1, month: 1,
   reputation: 10,
+  autoBreakthrough: { monthly: false, strategy: "direct", pills: 1 },
   resources: { lingshi: 300, lingyao: 40, kuangshi: 60, mucai: 80, danyao: 5 },
   buildings: { shanmen: 1, lingtian: 1, lingkuang: 0, yanwu: 1, danfang: 0, cangjing: 0, diziju: 1, zhifa: 0 }
 };

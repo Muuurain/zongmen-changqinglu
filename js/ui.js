@@ -198,13 +198,14 @@ const UI = {
       return `<tr>
         <td>${this.avatar(d)}${d.name} ${tags}</td>
         <td>${REALMS[d.realm].name}${STAGES[d.stage]}</td>
-        <td>${SPIRIT_ROOTS[d.root].name}</td>
+        <td title="${spiritRootInfo(d.root).grade} · 修炼×${spiritRootInfo(d.root).speed}">${spiritRootInfo(d.root).name}</td>
         <td>${CLASSES[d.cls].name}</td>
         <td><div class="bar exp"><div style="width:${pct}%"></div></div></td>
         <td>${Game.disciplePower(d)}</td>
         <td>${d.loyalty}</td>
         <td>${Math.floor(d.lifespanLeft)}年</td>
         <td>${d.tribulation ? "渡劫中" : d.inBranch ? "分宗驻守" : Game.escorting(d) ? "商队护送" : d.adventure ? "历练中" : (jobName ? BUILDINGS[jobName[0]].name : "空闲")}</td>
+        <td><label class="auto-participation"><input type="checkbox" aria-label="${d.name}参与自动突破" ${d.autoBreakthrough ? "checked" : ""} onchange="UI.setDiscipleAuto(${d.id},this.checked)">参与</label></td>
         <td>
           ${ready && !Game.canBreakthrough(d).err ? `<button class="btn small primary" onclick="UI.showBreakthrough(${d.id})">突破</button>` : ""}
           ${d.realm === 7 && d.stage === 3 && d.exp >= stageExpNeed(7, 3) ? `<button class="btn small danger" onclick="UI.showDujie(${d.id})">${d.tribulation ? "继续渡劫" : "渡劫"}</button>` : ""}
@@ -212,11 +213,46 @@ const UI = {
         </td>
       </tr>`;
     }).join("");
-    el.innerHTML = `<div class="panel"><h3>弟子名录（${list.length}/${Game.capacity()}）</h3>
-      <table><thead><tr>
+    const cfg = Game.state.autoBreakthrough;
+    el.innerHTML = `<div class="panel"><h3>自动突破</h3>
+      <div class="auto-controls">
+        <label>策略 <select id="auto-bt-strategy" onchange="UI.updateAutoBreakthrough()">${Object.entries(AUTO_BREAKTHROUGH).map(([id, x]) => `<option value="${id}" ${cfg.strategy === id ? "selected" : ""}>${x.name}</option>`).join("")}</select></label>
+        <label>每人丹药 <select id="auto-bt-pills" ${cfg.strategy === "direct" ? "disabled" : ""} onchange="UI.updateAutoBreakthrough()">${[1,2,3].map(n => `<option value="${n}" ${cfg.pills === n ? "selected" : ""}>${n} 颗</option>`).join("")}</select></label>
+        <label><input id="auto-bt-monthly" type="checkbox" ${cfg.monthly ? "checked" : ""} onchange="UI.updateAutoBreakthrough()">每月修炼后自动执行</label>
+        <button class="btn primary" id="btn-auto-breakthrough" onclick="UI.confirmAutoBreakthrough()">一键自动突破</button>
+      </div>
+      <p class="scroll-hint">${AUTO_BREAKTHROUGH[cfg.strategy].desc}。按弟子编号依次分配丹药；每人每轮至多突破一次，不自动请护法，不含九霄雷劫。</p>
+      <p class="scroll-hint">仅处理勾选且修为已满的健康驻守弟子，失败仍可能掉境、重伤、伤根或陨落。开启每月执行后，等丹者会在后续月结重试。</p>
+      </div><div class="panel"><h3>弟子名录（${list.length}/${Game.capacity()}）</h3>
+      <div class="table-scroll"><table><thead><tr>
         <th>姓名</th><th>境界</th><th>灵根</th><th>职业</th><th>修为</th>
-        <th>战力</th><th>忠诚</th><th>寿元</th><th>岗位</th><th>操作</th>
-      </tr></thead><tbody>${rows}</tbody></table></div>`;
+        <th>战力</th><th>忠诚</th><th>寿元</th><th>岗位</th><th>自动突破</th><th>操作</th>
+      </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  },
+  updateAutoBreakthrough() {
+    const r = Game.setAutoBreakthrough({ strategy: document.getElementById("auto-bt-strategy").value,
+      pills: Number(document.getElementById("auto-bt-pills").value), monthly: document.getElementById("auto-bt-monthly").checked });
+    if (r.err) return this.toast(r.err);
+    this.renderDisciples();
+    if (!Game.save(0)) this.toast("自动突破设置已应用，但自动保存失败，请手动存档");
+  },
+  setDiscipleAuto(id, enabled) {
+    const r = Game.setDiscipleAutoBreakthrough(id, enabled);
+    if (r.err) return this.toast(r.err);
+    if (!Game.save(0)) this.toast("弟子设置已应用，但自动保存失败，请手动存档");
+  },
+  confirmAutoBreakthrough() {
+    const err = Game.autoBreakthroughError();
+    if (err) return this.toast(err);
+    const cfg = Game.state.autoBreakthrough;
+    this.confirm(`为勾选的弟子执行一轮自动突破？\n策略：${AUTO_BREAKTHROUGH[cfg.strategy].name}；每人最多 ${cfg.strategy === "direct" ? 0 : cfg.pills} 颗丹药。\n失败风险与手动突破相同，可能陨落。`, () => {
+      const r = Game.runAutoBreakthrough();
+      if (r.err) return this.toast(r.err);
+      const saved = Game.save(0);
+      this.render();
+      this.modal(`<h2>自动突破结果</h2><div class="modal-text">尝试 ${r.attempted} 人，成功 ${r.succeeded} 人，失败 ${r.failed} 人，等丹 ${r.waiting} 人，跳过 ${r.skipped} 人；耗丹 ${r.pillsUsed} 颗。\n${r.results.join("\n") || "暂无符合条件的弟子。"}${saved ? "" : "\n⚠ 自动保存失败，请手动存档。"}</div>
+        <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal()">知道了</button></div>`);
+    }, true);
   },
 
   showDiscipleDetail(id) {
@@ -228,7 +264,8 @@ const UI = {
       <div class="modal-text">
 性别：${d.gender}　年龄：${Math.floor(d.age)}　剩余寿元：${Math.floor(d.lifespanLeft)} 年
 境界：${REALMS[d.realm].name}${STAGES[d.stage]}
-灵根：${SPIRIT_ROOTS[d.root].name}（修炼×${SPIRIT_ROOTS[d.root].speed}）
+灵根：${spiritRootInfo(d.root).name}（${spiritRootInfo(d.root).grade}，${spiritRootInfo(d.root).count} 属性，修炼×${spiritRootInfo(d.root).speed}）
+自动突破：${d.autoBreakthrough ? "参与（可在弟子名录取消勾选）" : "不参与"}
 职业：${CLASSES[d.cls].name}（${CLASSES[d.cls].cat}类 - ${CLASSES[d.cls].desc}）
 心性：${d.personality}　气运：${d.luck}　悟性：${d.comprehension}
 忠诚度：${d.loyalty}　综合战力：${Game.disciplePower(d)}
@@ -863,12 +900,16 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
   renderRecruit() {
     const s = Game.state;
     const el = document.getElementById("view-recruit");
-    el.innerHTML = `<div class="grid cols-2">
+    const profile = Game.recruitmentProfile();
+    el.innerHTML = `<div class="panel"><h3>招贤资质</h3>
+      <p>宗门战力 ${Math.round(profile.power)} · 声望 ${s.reputation} · 招贤分 ${Math.round(profile.quality * 100)}/100</p>
+      <p class="scroll-hint">战力与声望越高，优秀灵根概率越高；天灵根为金木水火土中的单属性，雷冰风为异灵根，二至五灵根随属性增多修炼减慢。概率提升不保证每次招募得到天才。</p></div><div class="grid cols-2">
       ${Object.entries(RECRUIT).map(([id, r]) => `<div class="panel">
         <h3>${r.name}</h3>
         <p style="color:var(--text-dim)">${r.desc}</p>
         <p>消耗：${Object.entries(r.cost).map(([k, v]) => `${RESOURCES[k].name}×${v}`).join(" ")}</p>
         <p>名额：${Game.aliveDisciples().length}/${Game.capacity()}</p>
+        <p>天灵根或异灵根概率：${Game.recruitmentProfile({ method: id }).excellentChance.toFixed(1)}%</p>
         <button class="btn primary" style="margin-top:8px" onclick="UI.doRecruit('${id}')">开始${r.name}</button>
       </div>`).join("")}
     </div>`;
@@ -877,7 +918,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     const r = Game.recruit(method);
     if (r.err) return this.toast(r.err);
     const list = r.list.map(d =>
-      `<img class="recruit-face" src="${this.avatarPath(d)}" alt="" onerror="this.style.display='none'">${d.name}（${SPIRIT_ROOTS[d.root].name}·${CLASSES[d.cls].name}·悟性${d.comprehension}·气运${d.luck}）`).join("\n");
+      `<img class="recruit-face" src="${this.avatarPath(d)}" alt="" onerror="this.style.display='none'">${d.name}（${spiritRootInfo(d.root).name}·${CLASSES[d.cls].name}·悟性${d.comprehension}·气运${d.luck}）`).join("\n");
     this.modal(`<h2>招募结果</h2><div class="modal-text">${list}</div>
       <div class="modal-footer"><button class="btn primary" onclick="UI.closeModal();UI.render()">收入门下</button></div>`);
   },

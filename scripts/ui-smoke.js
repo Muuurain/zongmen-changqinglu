@@ -15,7 +15,12 @@ const { pathToFileURL } = require('node:url');
   page.on('requestfailed', request => { if (!request.url().endsWith('.mp3')) missing.push(request.url()); });
   const output = process.env.ZONGMEN_UI_OUTPUT;
   if (output) fs.mkdirSync(output, { recursive: true });
-  const record = async name => { if (output) await page.screenshot({ path: path.join(output, name + '.png'), fullPage: true }); };
+  const record = async name => {
+    if (!output) return;
+    // 等待有限时长的进场动画，避免截图记录到淡入中的空白页面；忽略循环背景动画。
+    await page.evaluate(() => Promise.all(document.getAnimations().filter(a => Number.isFinite(a.effect.getComputedTiming().endTime)).map(a => a.finished.catch(() => {}))));
+    await page.screenshot({ path: path.join(output, name + '.png'), fullPage: true });
+  };
   try {
     const entry=process.env.ZONGMEN_UI_ENTRY || path.resolve(__dirname, '..', 'index.html');
     await page.goto(pathToFileURL(path.resolve(entry)).href);
@@ -79,8 +84,60 @@ const { pathToFileURL } = require('node:url');
     assert.equal(await page.locator('.dujie-wave.pass').count(),1);
     assert.match(await page.locator('#modal').innerText(),/硬抗第 2 道天雷/);
     await record('tribulation-resume');
+    // 自动突破设置、逐弟子开关和灵根展示。
+    await page.evaluate(() => {
+      UI.closeModal();Game.newGame();Math.random=()=>0;Game.state.resources.danyao=0;
+      Game.state.disciples.forEach(d=>{d.exp=stageExpNeed(d.realm,d.stage);});UI.render();
+    });
+    await page.locator('.nav-btn[data-view="disciples"]').click();
+    await page.getByRole('checkbox',{name:'顾长风参与自动突破',exact:true}).uncheck();
+    await page.locator('#auto-bt-strategy').selectOption('wait');
+    await page.locator('#auto-bt-pills').selectOption('2');
+    await page.locator('#auto-bt-monthly').check();
+    await page.reload();
+    await page.locator('.nav-btn[data-view="disciples"]').click();
+    assert.equal(await page.getByRole('checkbox',{name:'顾长风参与自动突破',exact:true}).isChecked(),false);
+    assert.equal(await page.locator('#auto-bt-strategy').inputValue(),'wait');
+    assert.equal(await page.locator('#auto-bt-pills').inputValue(),'2');
+    assert.equal(await page.locator('#auto-bt-monthly').isChecked(),true);
+    await record('auto-breakthrough-settings');
+    const runBatch=async()=>{
+      await page.locator('#btn-auto-breakthrough').click();
+      await page.getByRole('button',{name:'确认',exact:true}).click();
+    };
+    await runBatch();assert.match(await page.locator('#modal').innerText(),/等丹 2 人/);
+    assert.equal(await page.evaluate(()=>Game.state.disciples[1].stage),0);
+    await page.getByRole('button',{name:'知道了',exact:true}).click();
+    await page.evaluate(()=>{Game.state.resources.danyao=2;Math.random=()=>0;});
+    await runBatch();assert.match(await page.locator('#modal').innerText(),/成功 1 人.*等丹 1 人/);
+    await record('auto-breakthrough-result');
+    await page.getByRole('button',{name:'知道了',exact:true}).click();
+    await page.evaluate(()=>{Game.state.resources.danyao=2;});
+    await page.locator('#btn-next-month').click();
+    assert.equal(await page.evaluate(()=>Game.state.disciples[2].stage),1);
+    assert.equal(await page.evaluate(()=>Game.state.disciples[0].stage),0);
+    // 统一命名与招贤概率实际渲染，狭窄窗口下配置栏保持可操作。
+    await page.evaluate(()=>{
+      UI.closeModal();Game.newGame();
+      Game.state.disciples[0].root={kind:'normal',elements:['金']};
+      Game.state.disciples[1].root={kind:'normal',elements:['金','木','水','火','土']};
+      Game.state.disciples[2].root={kind:'mutant',elements:['雷']};UI.render();
+    });
+    await page.locator('.nav-btn[data-view="disciples"]').click();
+    assert.match(await page.locator('#view-disciples').innerText(),/金天灵根/);
+    assert.match(await page.locator('#view-disciples').innerText(),/金木水火土五灵根/);
+    assert.match(await page.locator('#view-disciples').innerText(),/雷异灵根/);
+    await page.setViewportSize({width:1100,height:700});await record('auto-breakthrough-1100');
+    assert.ok(await page.locator('#btn-auto-breakthrough').isVisible());
+    await page.setViewportSize({width:1360,height:860});
+    await page.locator('.nav-btn[data-view="recruit"]').click();
+    assert.match(await page.locator('#view-recruit').innerText(),/天灵根或异灵根概率/);
+    const low=await page.evaluate(()=>Game.recruitmentProfile().excellentChance);
+    await page.evaluate(()=>{Game.state.reputation=500;Game.state.disciples.forEach(d=>{d.realm=7;d.stage=3;});UI.renderRecruit();});
+    assert.ok(await page.evaluate(()=>Game.recruitmentProfile().excellentChance)>low);
+    await record('root-recruitment');
     assert.deepEqual(errors,[]);assert.deepEqual([...new Set(missing)],[]);
-    const result={passed:true,views:10,checks:['monthlyCultivation','pillButtons','guardianButton','warTactic','sharedWarCooldown','eventRetry','eventReload','postWarReload','tribulationReload'],pageErrors:errors,missingAssets:[...new Set(missing)]};
+    const result={passed:true,views:10,checks:['monthlyCultivation','pillButtons','guardianButton','warTactic','sharedWarCooldown','eventRetry','eventReload','postWarReload','tribulationReload','autoSettingsReload','autoWait','autoMonthly','rootNaming','rootRecruitment','autoNarrowViewport'],pageErrors:errors,missingAssets:[...new Set(missing)]};
     if(output)fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2));
     console.log(JSON.stringify(result,null,2));
   } finally { await browser.close(); }

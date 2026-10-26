@@ -27,7 +27,7 @@
 |---|---|
 | `js/data.js` | 全部静态配置表：境界（REALMS）、灵根、职业（CLASSES）、建筑（BUILDINGS）、突破规则、NPC 宗门、随机/历练/议事/全界事件、商路、渡劫、灵界分宗等。**数据驱动，扩展新内容优先改这里** |
 | `js/game.js` | 游戏状态（`Game.state`）与全部业务逻辑：新周目、招募、岗位、建筑升级、突破、外交、战争（编队/战术/战后）、附庸、商队、历练、长老院/客卿、派系、底蕴气运、联盟、渡劫、灵界分宗、全界大事件、月度结算（`nextMonth`）、存档（`save/load`） |
-| `js/ui.js` | 全部视图渲染与交互：总览/弟子/建筑/历练/商路/外交/灵界/招募/宗门志 8 个视图，弹窗（突破/战争指挥室/渡劫/议事/事件），BGM/音效控制，事件队列（`_msgQueue`） |
+| `js/ui.js` | 全部视图渲染与交互：总览/弟子/长老院/建筑/历练/商路/外交/灵界/招募/宗门志 10 个视图，弹窗（突破/批量突破/战争指挥室/渡劫/议事/事件），BGM/音效控制，读取持久化事件队列 `state.pendingEvents` |
 | `main.js` | Electron 主进程入口，创建 `BrowserWindow` 加载 `index.html` |
 | `scripts/build-portable.js` | 便携版一键打包脚本（复制运行时 + 写入游戏文件 + 压缩 zip） |
 | `package.json` | 依赖、脚本（start/pack/dist/build:portable）、electron-builder 配置 |
@@ -57,7 +57,7 @@ UI 弹窗/提示 + UI.render() 重渲染视图 ◄── 读取 Game.state
    │ 点击「闭关一月」
    ▼
 Game.nextMonth() 月度结算
-   ├─ 建筑产出、弟子修炼/寿元/忠诚、附庸/商队/历练/客卿/派系/联盟/分宗/世界演进
+   ├─ 建筑产出、弟子修炼、可选自动突破、寿元/忠诚、附庸/商队/历练/客卿/派系/联盟/分宗/世界演进
    ├─ 抽取随机事件 / 全界大事件 / 历练归来事件
    └─ autosave() 写入 localStorage
    ▼
@@ -71,16 +71,21 @@ UI._drainQueue() 依次弹出事件弹窗，玩家逐个抉择（Game.applyEvent
 ```js
 // 游戏全局状态 Game.state
 {
+  saveVersion: 3,
   sectName, year, month, reputation, generation,
+  autoBreakthrough: { monthly: false, strategy: "direct", pills: 1 },
   resources: { lingshi, lingyao, kuangshi, mucai, danyao },
   buildings: { shanmen: lv, lingtian: lv, ... },  // 8 类
   jobs: { buildingId: [discipleId, ...] },          // 岗位分配
-  disciples: [ { id, name, gender, realm, stage, exp, root, personality,
+  disciples: [ { id, name, gender, realm, stage, exp,
+                 root: { kind: "normal", elements: ["金", "木"] },
+                 autoBreakthrough: true, personality,
                  cls, luck, comprehension, loyalty, lifespanLeft, alive,
                  isLeader, isElder, keqing, inBranch, injuredMonths,
                  foundationDmg, xinyi, adventure, ascended, ... } ],
   sects: [ { id, name, power, relation, allied, trade, atWar, vassal, loyalty, destroyed, broken } ],
-  caravans: [ { routeId, goodsId, amount, escortId, monthsLeft } ],
+  caravans: [ { routeId, goodsId, amount, escortId, monthsLeft, cost } ],
+  pendingEvents: [ { type, ev, dId, list } ],
   alliance: { name, members, prestige, raidCd },
   spiritSects: [ ... ], branch: { disciples, spiritRep },
   heritage, qiyun, factionTension, spiritStep, spiritChannel,
@@ -99,6 +104,8 @@ UI._drainQueue() 依次弹出事件弹窗，玩家逐个抉择（Game.applyEvent
 | `recruit(method) / makeDisciple(opts)` | 招募与弟子生成 |
 | `assignJob(bId,dId) / upgradeBuilding(bId)` | 岗位与建筑 |
 | `tryBreakthrough(dId,pills,guardians)` | 突破（含失败惩罚） |
+| `setAutoBreakthrough / setDiscipleAutoBreakthrough / runAutoBreakthrough` | 全局策略、个人开关、单轮批量突破；月结可选调用，复用手动规则 |
+| `recruitmentProfile / rollSpiritRoot` | 战力与声望影响招贤概率，生成无重复属性的结构化灵根 |
 | `diploAction(sectId,actionId) / startAssault / postWar` | 外交与战争 |
 | `dispatchCaravan / sendAdventure` | 商队与历练 |
 | `recruitKeqing / appointElder / factionTick` | 长老院与派系 |
@@ -121,3 +128,7 @@ D:\Code\宗门长青录\
 ```
 
 **发布**：GitHub 仓库 `Muuurain/zongmen-changqinglu`，Release v1.0.0 提供 `ZongMenChangQingLu-Setup-1.0.0.exe`（NSIS 安装包）。
+
+## 8. v1.2.0 兼容说明
+
+灵根的格式、倍率、招募公式和 v1/v2 迁移映射详见 [本次交接](v1.2.0-自动突破与灵根重构.md)。`root` 不再是数字索引，统一调用 `spiritRootInfo(root)` 获取展示名与倍率。自动突破不跳过风险校验，不负责渡劫，不会在读档时立即执行；旧档默认关闭月结自动执行。历史 F01—F26 记录已迁入 [Markdown 归档](v1.1.2-修复与Agent交接.md)。
