@@ -59,7 +59,7 @@
 ## 运行方式
 
 ### 方式一：下载 exe 安装程序（推荐）
-从 [Releases](../../releases) 下载最新版 `ZongMenChangQingLu-Setup-x.x.x.exe`（NSIS 安装程序），运行后按向导安装即可。源码工作区已构建 v1.2.1 安装包；如对应 Release 尚未上传，请使用本地 `dist/宗门长青录 Setup 1.2.1.exe` 或等待发布资产同步。Release 资产仅提供 exe 安装程序，不提供 zip 压缩包。
+从 [Releases](../../releases) 下载最新版 `ZongMenChangQingLu-Setup-x.x.x.exe`（NSIS 安装程序），运行后按向导安装即可。当前最新为 [v1.2.1](../../releases/tag/v1.2.1)。Release 资产仅提供 exe 安装程序，不提供 zip 压缩包。
 
 也可直接打开本项目 `index.html` 游玩，或启动已重建的便携版 `dist-portable/宗门长青录-win32-x64/宗门长青录.exe`。
 
