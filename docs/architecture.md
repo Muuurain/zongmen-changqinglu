@@ -12,7 +12,7 @@
 │  渲染/交互层  │  核心逻辑引擎  │  配置表(数据层) │
 ├──────────────┴──────────────┴───────────────┤
 │  css/style.css（国风水墨样式 + 资源引用）       │
-│  assets/（30 项美术/音频，运行时静态加载）       │
+│  assets/（按目录组织美术/音频资源，运行时静态加载） │
 ├─────────────────────────────────────────────┤
 │  main.js（Electron 主进程，仅开窗加载页面）     │
 └─────────────────────────────────────────────┘
@@ -120,7 +120,7 @@ D:\Code\宗门长青录\
 ├── index.html / main.js / package.json
 ├── css\style.css
 ├── js\{data,game,ui}.js
-├── assets\*.png / *.mp3      # 30 项资源
+├── assets\{anim,avatar,icon,ill,portrait,ui,audio}\ # 按用途分类的资源
 ├── docs\{PRD,architecture,progress,资源清单}.md
 ├── scripts\build-portable.js
 ├── dist\                     # electron-builder 产物（NSIS 安装包 + blockmap）
@@ -132,3 +132,7 @@ D:\Code\宗门长青录\
 ## 8. v1.2.0 兼容说明
 
 灵根的格式、倍率、招募公式和 v1/v2 迁移映射详见 [本次交接](v1.2.0-自动突破与灵根重构.md)。`root` 不再是数字索引，统一调用 `spiritRootInfo(root)` 获取展示名与倍率。自动突破不跳过风险校验，不负责渡劫，不会在读档时立即执行；旧档默认关闭月结自动执行。历史 F01—F26 记录已迁入 [Markdown 归档](v1.1.2-修复与Agent交接.md)。
+
+## 9. v1.2.1 美术资源与动画接入
+
+四组帧动画使用行优先（row-major）PNG 精灵图；播放网格、动画时长、循环/单次播放和 reduced-motion 样式集中在 `css/style.css`，资源映射与图片布局在 `js/ui.js`。新版 m4 头像通过弟子 `avatarId` 选择；旧存档缺省迁移为 `m4_legacy`，避免已有角色外观变化。完整资源校验、接入点及构建注意事项见 [v1.2.1 交接文档](v1.2.1-动画美术资源接入与修复.md)。

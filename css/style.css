@@ -315,3 +315,152 @@ tr:hover td { background: rgba(255,255,255,.03); }
 
 /* 状态小图标 */
 .state-ico { width: 1rem; height: 1rem; vertical-align: -0.1875rem; margin-right: 0.125rem; }
+
+/* v1.2.1：确定网格尺寸与帧索引，避免跨格残影和旧的单行步进错位。 */
+#topbar::after { animation: cloudflow-v121 32s linear infinite; }
+@keyframes cloudflow-v121 {
+  from { background-position-x: 0; }
+  to { background-position-x: calc(0px - var(--cloud-tile-width, 18rem)); }
+}
+.modal {
+  border-image-source: url("../assets/ui/ui_modal_border.png");
+  border-image-slice: 48 fill; border-image-width: 0.75rem;
+  border-image-repeat: stretch; border-width: 0.75rem; border-style: solid;
+}
+.divider-img {
+  display: block; box-sizing: content-box; width: calc(100% - 2rem); height: 0;
+  border: 0.75rem solid transparent; border-image-source: url("../assets/ui/ui_divider.png");
+  border-image-slice: 12 64 fill; border-image-width: 0.75rem 1rem;
+  border-image-repeat: stretch; opacity: .8; margin: 0.25rem auto;
+}
+.modal-ill-landscape { height: auto; aspect-ratio: 16 / 9; max-height: 45vh; object-fit: contain; background: #151823; }
+.modal-ill-full { object-fit: contain; }
+.card-ill { height: auto; aspect-ratio: 16 / 9; object-fit: contain; background: #151823; }
+.avatar-wrap .sprite-aura { width: 9.375rem; height: 9.375rem; background-size: 56.25rem 37.5rem; z-index: 0; }
+.avatar-wrap.big .avatar { position: relative; z-index: 1; }
+
+.sprite-breakthrough { background-size: 96rem 64rem; animation: play-breakthrough 1s steps(1, end) 1 forwards; }
+.sprite-dujie-bolt { background-size: 64rem 128rem; animation: play-dujie 0.8s steps(1, end) 1 forwards; }
+.sprite-sword-clash { background-size: 72rem 36rem; animation: play-sword 0.75s steps(1, end) 1 forwards; }
+.sprite-aura { animation: play-aura 2s steps(1, end) infinite; }
+@keyframes play-aura {
+  0% { background-position: 0 0; }
+  4.1667% { background-position: -9.375rem 0; }
+  8.3333% { background-position: -18.75rem 0; }
+  12.5% { background-position: -28.125rem 0; }
+  16.6667% { background-position: -37.5rem 0; }
+  20.8333% { background-position: -46.875rem 0; }
+  25% { background-position: 0 -9.375rem; }
+  29.1667% { background-position: -9.375rem -9.375rem; }
+  33.3333% { background-position: -18.75rem -9.375rem; }
+  37.5% { background-position: -28.125rem -9.375rem; }
+  41.6667% { background-position: -37.5rem -9.375rem; }
+  45.8333% { background-position: -46.875rem -9.375rem; }
+  50% { background-position: 0 -18.75rem; }
+  54.1667% { background-position: -9.375rem -18.75rem; }
+  58.3333% { background-position: -18.75rem -18.75rem; }
+  62.5% { background-position: -28.125rem -18.75rem; }
+  66.6667% { background-position: -37.5rem -18.75rem; }
+  70.8333% { background-position: -46.875rem -18.75rem; }
+  75% { background-position: 0 -28.125rem; }
+  79.1667% { background-position: -9.375rem -28.125rem; }
+  83.3333% { background-position: -18.75rem -28.125rem; }
+  87.5% { background-position: -28.125rem -28.125rem; }
+  91.6667% { background-position: -37.5rem -28.125rem; }
+  95.8333% { background-position: -46.875rem -28.125rem; }
+  100% { background-position: -46.875rem -28.125rem; }
+}
+@keyframes play-breakthrough {
+  0% { background-position: 0 0; }
+  4.1667% { background-position: -16rem 0; }
+  8.3333% { background-position: -32rem 0; }
+  12.5% { background-position: -48rem 0; }
+  16.6667% { background-position: -64rem 0; }
+  20.8333% { background-position: -80rem 0; }
+  25% { background-position: 0 -16rem; }
+  29.1667% { background-position: -16rem -16rem; }
+  33.3333% { background-position: -32rem -16rem; }
+  37.5% { background-position: -48rem -16rem; }
+  41.6667% { background-position: -64rem -16rem; }
+  45.8333% { background-position: -80rem -16rem; }
+  50% { background-position: 0 -32rem; }
+  54.1667% { background-position: -16rem -32rem; }
+  58.3333% { background-position: -32rem -32rem; }
+  62.5% { background-position: -48rem -32rem; }
+  66.6667% { background-position: -64rem -32rem; }
+  70.8333% { background-position: -80rem -32rem; }
+  75% { background-position: 0 -48rem; }
+  79.1667% { background-position: -16rem -48rem; }
+  83.3333% { background-position: -32rem -48rem; }
+  87.5% { background-position: -48rem -48rem; }
+  91.6667% { background-position: -64rem -48rem; }
+  95.8333% { background-position: -80rem -48rem; }
+  100% { background-position: -80rem -48rem; }
+}
+@keyframes play-dujie {
+  0% { background-position: 0 0; }
+  6.25% { background-position: -16rem 0; }
+  12.5% { background-position: -32rem 0; }
+  18.75% { background-position: -48rem 0; }
+  25% { background-position: 0 -32rem; }
+  31.25% { background-position: -16rem -32rem; }
+  37.5% { background-position: -32rem -32rem; }
+  43.75% { background-position: -48rem -32rem; }
+  50% { background-position: 0 -64rem; }
+  56.25% { background-position: -16rem -64rem; }
+  62.5% { background-position: -32rem -64rem; }
+  68.75% { background-position: -48rem -64rem; }
+  75% { background-position: 0 -96rem; }
+  81.25% { background-position: -16rem -96rem; }
+  87.5% { background-position: -32rem -96rem; }
+  93.75% { background-position: -48rem -96rem; }
+  100% { background-position: -48rem -96rem; }
+}
+@keyframes play-sword {
+  0% { background-position: 0 0; }
+  5.5556% { background-position: -12rem 0; }
+  11.1111% { background-position: -24rem 0; }
+  16.6667% { background-position: -36rem 0; }
+  22.2222% { background-position: -48rem 0; }
+  27.7778% { background-position: -60rem 0; }
+  33.3333% { background-position: 0 -12rem; }
+  38.8889% { background-position: -12rem -12rem; }
+  44.4444% { background-position: -24rem -12rem; }
+  50% { background-position: -36rem -12rem; }
+  55.5556% { background-position: -48rem -12rem; }
+  61.1111% { background-position: -60rem -12rem; }
+  66.6667% { background-position: 0 -24rem; }
+  72.2222% { background-position: -12rem -24rem; }
+  77.7778% { background-position: -24rem -24rem; }
+  83.3333% { background-position: -36rem -24rem; }
+  88.8889% { background-position: -48rem -24rem; }
+  94.4444% { background-position: -60rem -24rem; }
+  100% { background-position: -60rem -24rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #topbar::after { animation: none; }
+  .sprite { animation: none !important; }
+  .view { animation: none; }
+  .btn, .dujie-wave { transition: none; animation: none; }
+}
+.dujie-effect { height: 20rem; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0.25rem 0; }
+.dujie-effect .sprite-dujie-bolt { width: 10rem; height: 20rem; margin: 0; transform: none; background-size: 40rem 80rem; animation: play-dujie-v121 0.8s steps(1, end) 1 forwards; }
+@keyframes play-dujie-v121 {
+  0% { background-position: 0 0; }
+  6.25% { background-position: -10rem 0; }
+  12.5% { background-position: -20rem 0; }
+  18.75% { background-position: -30rem 0; }
+  25% { background-position: 0 -20rem; }
+  31.25% { background-position: -10rem -20rem; }
+  37.5% { background-position: -20rem -20rem; }
+  43.75% { background-position: -30rem -20rem; }
+  50% { background-position: 0 -40rem; }
+  56.25% { background-position: -10rem -40rem; }
+  62.5% { background-position: -20rem -40rem; }
+  68.75% { background-position: -30rem -40rem; }
+  75% { background-position: 0 -60rem; }
+  81.25% { background-position: -10rem -60rem; }
+  87.5% { background-position: -20rem -60rem; }
+  93.75% { background-position: -30rem -60rem; }
+  100% { background-position: -30rem -60rem; }
+}

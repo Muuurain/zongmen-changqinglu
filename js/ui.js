@@ -16,6 +16,18 @@ const UI = {
     };
     fitUI();
     window.addEventListener("resize", fitUI);
+    const topbar = document.getElementById("topbar");
+    const syncCloudTile = () => {
+      const height = topbar.getBoundingClientRect().height;
+      if (height > 0) topbar.style.setProperty("--cloud-tile-width", `${height * 8}px`);
+    };
+    syncCloudTile();
+    if ("ResizeObserver" in window) {
+      this._cloudObserver = new ResizeObserver(syncCloudTile);
+      this._cloudObserver.observe(topbar);
+    } else {
+      window.addEventListener("resize", syncCloudTile);
+    }
 
     document.querySelectorAll(".nav-btn").forEach(btn => {
       btn.onclick = () => this.switchView(btn.dataset.view);
@@ -101,35 +113,46 @@ const UI = {
   },
   // 弟子头像：按性别+id 稳定取图（v1.1.0 扩至 4 变体；1-2 在根目录，3-4 在 avatar/ 子目录）
   avatar(d, cls) {
-    const n = (d.id % 4) + 1;
-    const file = (d.gender === "男" ? "avatar_m" : "avatar_f") + n;
-    const path = n <= 2 ? `assets/${file}.png` : `assets/avatar/${file}.png`;
-    return `<img class="avatar ${cls || ""}" src="${path}" alt="">`;
+    return `<img class="avatar ${cls || ""}" src="${this.avatarPath(d)}" alt="">`;
   },
   // 弟子头像路径（供招募结果等直接取地址）
   avatarPath(d) {
-    const n = (d.id % 4) + 1;
-    const file = (d.gender === "男" ? "avatar_m" : "avatar_f") + n;
-    return n <= 2 ? `assets/${file}.png` : `assets/avatar/${file}.png`;
+    const id = d.avatarId || ((d.gender === "男" ? "m" : "f") + ((d.id % 4) + 1));
+    const file = id === "m4_legacy" ? "avatar_m4_legacy" : `avatar_${id}`;
+    return ["m1", "m2", "f1", "f2"].includes(id) ? `assets/${file}.png` : `assets/avatar/${file}.png`;
   },
   // NPC 宗主头像映射（按宗门气质对应立绘）
   npcPortrait(secId) {
-    const map = { tieyang: "portrait_npc_chiyun", hanjian: "portrait_npc_xuanjian", baihua: "portrait_npc_biluo", qingzhu: "portrait_npc_lingxiao" };
+    const map = { tieyang: "portrait_npc_tieyang", hanjian: "portrait_npc_xuanjian", baihua: "portrait_npc_biluo", qingzhu: "portrait_npc_qingzhu" };
     return map[secId] ? `assets/portrait/${map[secId]}.png` : null;
   },
   // 长老立绘映射（按职业领域）
   elderPortrait(cls) {
-    const map = { dan: "portrait_elder_alchemist", qi: "portrait_elder_forge", fu: "portrait_elder_forge",
-      sword: "portrait_elder_discipline", spell: "portrait_elder_discipline", body: "portrait_elder_discipline", array: "portrait_elder_discipline",
-      envoy: "portrait_elder_scholar", preach: "portrait_elder_scholar" };
+    const map = { dan: "portrait_role_alchemist", qi: "portrait_role_forge", fu: "portrait_role_forge",
+      law: "portrait_role_discipline", envoy: "portrait_role_scholar", preach: "portrait_role_scholar" };
     return map[cls] ? `assets/portrait/${map[cls]}.png` : null;
   },
   // 事件插画映射（按事件 id 归类）
   eventIll(evId) {
-    if (/mijing|legacy|ruins|dunwu/.test(evId)) return "assets/ill/ill_event_ruins.png";
-    if (/xieyue|shouchao|beast/.test(evId)) return "assets/ill/ill_event_beast.png";
-    if (/laifang|qiushi|shangdui|xinmo|tianjiao|sidu|zhalu|lingmai/.test(evId)) return "assets/ill/ill_event_guest.png";
-    return null;
+    const map = {
+      xieyue: "ill_event_wounded", lingmai: "ill_event_vein", xinmo: "ill_event_heart_demon",
+      shangdui: "ill_trade_r1", sidu: "ill_event_duel", mijing: "ill_event_ruins",
+      laifang: "ill_event_guest", dunwu: "ill_event_insight", zhalu: "ill_event_furnace",
+      tianjiao: "ill_event_genius", shouchao: "ill_event_beast", qiushi: "ill_adventure_town",
+      adv_herb: "ill_adventure_lingchuan", adv_beggar: "ill_adventure_beggar",
+      adv_duel: "ill_event_duel", adv_legacy: "ill_event_ruins", adv_beast: "ill_event_beast",
+      adv_romance: "ill_adventure_romance", modao_invasion: "ill_event_beast",
+      ancient_mijing: "ill_event_ruins", tide: "ill_world_tianmo", tianmo: "ill_world_tianmo"
+    };
+    return map[evId] ? `assets/ill/${map[evId]}.png` : null;
+  },
+  worldEventIll(evId) {
+    return ({
+      modao_invasion: "assets/bg_war.png",
+      ancient_mijing: "assets/ill/ill_event_ruins.png",
+      tide: "assets/bg_spirit.png",
+      tianmo: "assets/ill/ill_world_tianmo.png"
+    })[evId] || null;
   },
 
   // ---------- 宗门总览 ----------
@@ -333,7 +356,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     if (r.ok) this.sfx("realm_up");
     const d = Game.state.disciples.find(x => x.id === id);
     this.modal(`
-      ${r.ok ? `<img class="modal-ill" src="assets/ill/ill_breakthrough.png" alt="">
+      ${r.ok ? `<img class="modal-ill modal-ill-landscape" src="assets/ill/ill_breakthrough.png" alt="">
       <div class="sprite sprite-breakthrough"></div>` : ""}
       <h2>${r.ok ? "突破成功！" : "突破失败……"}</h2>
       <div class="modal-text">${r.ok
@@ -354,7 +377,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       const workers = (s.jobs[id] || []).map(did => s.disciples.find(d => d.id === did)).filter(d => d && d.alive);
       const idle = Game.aliveDisciples().filter(d => Game.available(d) && !Game.hasJob(d));
       return `<div class="panel">
-        <h3><img class="b-icon" src="assets/icon_${id}.png" alt="" onerror="this.style.display='none'">${b.name} <span style="color:var(--text-dim);font-size:0.8125rem">Lv.${lv}/${b.maxLv}</span></h3>
+        <h3><img class="b-icon" src="assets/icon/icon_building_${id}.png" alt="" onerror="this.style.display='none'">${b.name} <span style="color:var(--text-dim);font-size:0.8125rem">Lv.${lv}/${b.maxLv}</span></h3>
         <p style="color:var(--text-dim);margin-bottom:8px">${b.desc}</p>
         <p>效果：<span style="color:var(--jade)">${b.effect(Math.max(1, lv))}</span></p>
         ${b.jobs > 0 && b.jobs < 99 ? `<p>岗位：${workers.length}/${b.jobs}
@@ -526,7 +549,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         </div>
         <div class="modal-text">可派遣弟子（点击加入 前/中/后排）：</div>
         <div>${pool.map(d => `<div class="war-candidate"><span class="tag">${d.name}（${CLASSES[d.cls].name}·战力${Game.disciplePower(d)}）</span>${["front", "mid", "back"].map(row => `<button class="btn small" onclick="UI._warAdd('${sectId}','${row}',${d.id})">${{front:"前",mid:"中",back:"后"}[row]}</button>`).join("")}</div>`).join("") || "无人可派"}</div>
-        <img class="divider-img" src="assets/ui_divider.png">
+        <div class="divider-img" aria-hidden="true"></div>
         <div class="modal-text">战术选择：</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           ${Object.entries(TACTICS).map(([id, t]) => `<button class="btn small tactic-btn ${tactic === id ? "primary" : ""}"
@@ -608,8 +631,8 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
           <h3>长老院（${elders.length}/${ELDER.maxSeats}）</h3>
           ${elders.map(d => {
             const ep = this.elderPortrait(d.cls);
-            return `<div class="elder-row">${ep ? `<img src="${ep}" alt="" onerror="this.style.display='none'">` : this.avatar(d)}
-            <span>${d.name} —— ${ELDER.domainName[ELDER.seatDomain[d.cls]]} +${Math.round(ELDER.bonusPerSeat * 100)}%</span>
+            return `<div class="elder-row">${this.avatar(d)}<span class="elder-name">${d.name} —— ${ELDER.domainName[ELDER.seatDomain[d.cls]]} +${Math.round(ELDER.bonusPerSeat * 100)}%</span>
+            ${ep ? `<img class="elder-role" src="${ep}" alt="${CLASSES[d.cls].name}职业示意" title="${CLASSES[d.cls].name}职业示意" onerror="this.style.display='none'">` : ""}
             <button class="btn small" onclick="UI.dismissElder(${d.id})">罢免</button></div>`;
           }).join("") || "<p style='color:var(--text-dim)'>虚位以待。</p>"}
           ${candidates.length ? `<hr style="border-color:var(--border);margin:8px 0">
@@ -675,13 +698,13 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         return `<div class="dujie-wave ${cls || ""}">${n}</div>`;
       }).join("");
       this.modal(`
-        ${done && this._dujieFinal && this._dujieFinal.success ? `<img class="modal-ill" src="assets/ill/ill_ascend.png" alt="">` : ""}
+        ${done && this._dujieFinal && this._dujieFinal.success ? `<img class="modal-ill modal-ill-landscape" src="assets/ill/ill_ascend.png" alt="">` : ""}
         <h2>⚡ 九霄雷劫 —— ${d.name}</h2>
         <div class="modal-text">${done ? "" : `渡劫准备：渡劫丹 ${pills}/${Math.min(DUJIE.maxPill, s.resources.danyao)}（每颗 +2%）　护法 ${guardians.length}/${Math.min(DUJIE.maxGuardian, elders.length)} 名（每名 +1.5%）
 底蕴加成 +${Math.round((s.heritage || 0) * DUJIE.heritageWaveBonus * 100)}%　气运加成 +${Math.round(Game.qiyunBonus() * 100)}%
 <b style="color:var(--gold)">每道天雷成功率：${Math.round(rate * 100)}%</b>（九雷全过则飞升，失败：重伤掉境 50% / 道基崩损 30% / 形神俱灭 20%）`}</div>
         <div class="dujie-waves">${wavesHtml}</div>
-        ${wave > 0 && !done ? `<div class="sprite sprite-dujie-bolt"></div>` : ""}
+        ${wave > 0 && !done ? `<div class="dujie-effect"><div class="sprite sprite-dujie-bolt"></div></div>` : ""}
         ${!done && wave === 0 ? `<div class="modal-options">
           <button class="btn opt-btn" onclick="UI._djPill(1)">渡劫丹 +1</button>
           <button class="btn opt-btn" onclick="UI._djPill(-1)">渡劫丹 -1</button>
@@ -811,7 +834,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         <p>路线：${TRADE_ROUTES.find(r => r.id === active.routeId).name}｜货物：${TRADE_GOODS[active.goodsId].name}×${active.amount}｜归期：${active.monthsLeft} 个月</p></div>` : ""}
       <div class="grid cols-3">
         ${TRADE_ROUTES.map((r, i) => `<div class="panel">
-          <img class="card-ill" src="assets/ill/ill_trade_r${i + 1}.png" alt="" onerror="this.style.display='none'">
+          <img class="card-ill" src="${({county:"assets/ill/ill_trade_r1.png",state:"assets/ill/ill_trade_state.png",border:"assets/ill/ill_trade_border.png"})[r.id]}" alt="" onerror="this.style.display='none'">
           <h3>${r.name}</h3>
           <p style="color:var(--text-dim)">${r.desc}</p>
           <p>单程 ${r.months} 个月｜基础利润 ${r.profit}｜遇劫风险 <span style="color:${r.risk > 0.3 ? "#d05a4e" : "var(--gold)"}">${Math.round(r.risk * 100)}%</span></p>
@@ -852,7 +875,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
         ${out.map(d => `<p>${this.avatar(d)}${d.name} —— ${ADVENTURE_PLACES.find(p => p.id === d.adventure.placeId).name}，${d.adventure.monthsLeft} 个月后归来</p>`).join("")}</div>` : ""}
       <div class="grid cols-3">
         ${ADVENTURE_PLACES.map(p => {
-          const advIll = { wild: "assets/ill/ill_adventure_lingchuan.png", town: "assets/ill/ill_adventure_haishi.png", ruins: "assets/ill/ill_adventure_moyuan.png" }[p.id];
+          const advIll = { wild: "assets/ill/ill_adventure_lingchuan.png", town: "assets/ill/ill_adventure_town.png", ruins: "assets/ill/ill_adventure_ruins.png" }[p.id];
           return `<div class="panel">
           <img class="card-ill" src="${advIll}" alt="" onerror="this.style.display='none'">
           <h3>${p.name}</h3>
@@ -965,10 +988,12 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     }
     if (item.type === "world") {
       const ev = item.ev;
+      const ill = this.worldEventIll(ev.id);
       this.sfx("event");
       this._pendingWorld = ev;
       this.modal(`
         <h2>【全界大事件】${ev.title}</h2>
+        ${ill ? `<img class="modal-ill modal-ill-landscape" src="${ill}" alt="" onerror="this.style.display='none'">` : ""}
         <div class="modal-text">${ev.text}</div>
         <div class="modal-options">
           ${ev.options.map((o, i) => `<button class="btn opt-btn" onclick="UI.chooseWorld(${i})">
@@ -991,8 +1016,10 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
       if (!d || !d.alive) { Game.completePendingEvent(); return this._drainQueue(); }
       this.sfx("event");
       this._pendingAdv = { d, ev };
+      const ill = this.eventIll(ev.id);
       this.modal(`
         <h2>【历练归来】${d.name} · ${ev.title}</h2>
+        ${ill ? `<img class="modal-ill modal-ill-landscape ${ev.id === "adv_beggar" ? "modal-ill-full" : ""}" src="${ill}" alt="" onerror="this.style.display='none'">` : ""}
         <div class="modal-text">${ev.text.replaceAll("{name}", d.name)}</div>
         <div class="modal-options">
           ${ev.options.map((o, i) => `<button class="btn opt-btn" onclick="UI.chooseAdv(${i})">
@@ -1041,7 +1068,7 @@ ${d.foundationDmg ? "⚠ 根基受损：修炼速度永久 -20%\n" : ""}
     this._pendingEvent = ev;
     const ill = this.eventIll(ev.id);
     this.modal(`
-      ${ill ? `<img class="modal-ill" src="${ill}" alt="" onerror="this.style.display='none'">` : ""}
+      ${ill ? `<img class="modal-ill modal-ill-landscape" src="${ill}" alt="" onerror="this.style.display='none'">` : ""}
       <h2>【事件】${ev.title}</h2>
       <div class="modal-text">${(msgs && msgs.length ? msgs.join("\n") + "\n\n" : "")}${ev.text}</div>
       <div class="modal-options">

@@ -40,14 +40,15 @@ const Game = {
   makeDisciple(opts = {}) {
     const s = this.state;
     const gender = Math.random() < 0.5 ? "男" : "女";
+    const id = s ? s.nextId++ : 1;
     const name = opts.name ||
       SURNAMES[rnd(SURNAMES.length)] + (gender === "男" ? GIVEN_M[rnd(GIVEN_M.length)] : GIVEN_F[rnd(GIVEN_F.length)]);
     const root = this.rollSpiritRoot(opts);
     const realm = opts.realm || 0;
     const age = opts.isLeader ? 45 : ri(15, 25);
     return {
-      id: s ? s.nextId++ : 1,
-      name, gender,
+      id, name, gender,
+      avatarId: (gender === "男" ? "m" : "f") + ((id % 4) + 1),
       realm, stage: 0, exp: 0,
       root, autoBreakthrough: true,
       personality: PERSONALITIES[rnd(PERSONALITIES.length)],
@@ -1071,6 +1072,13 @@ const Game = {
             !validSpiritRoot(d.root) || !CLASSES[d.cls] || !Number.isFinite(d.exp) || !Number.isFinite(d.lifespanLeft) ||
             ![d.age, d.comprehension, d.luck, d.loyalty].every(Number.isFinite) || typeof d.name !== "string") return false;
         ids.add(d.id);
+        if (d.avatarId !== undefined && !/^(?:[mf][1-4]|m4_legacy)$/.test(d.avatarId)) return false;
+        // 历史存档仍用旧 m4 立绘；新生成的弟子使用更新后的年轻版。
+        if (!d.avatarId) {
+          const n = (d.id % 4) + 1;
+          d.avatarId = (d.gender === "男" ? "m" : "f") + n;
+          if (d.avatarId === "m4") d.avatarId = "m4_legacy";
+        }
       }
       for (const key of Object.keys(RESOURCES)) if (!Number.isFinite(parsed.resources[key]) || parsed.resources[key] < 0) return false;
       for (const [key, lv] of Object.entries(parsed.buildings)) if (!BUILDINGS[key] || !Number.isInteger(lv) || lv < 0 || lv > BUILDINGS[key].maxLv) return false;
