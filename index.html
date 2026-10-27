@@ -2,19 +2,21 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#14161f">
 <title>宗门长青录</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div id="app">
+<div id="app" data-ready="false">
   <section id="start-screen" aria-labelledby="start-title">
     <div class="start-panel">
       <h1 id="start-title">宗门长青录</h1>
-      <p id="start-save-info">太元年间，山门初立。</p>
+      <p id="start-save-info">正在载入宗门存档……</p>
       <div id="start-actions" class="start-actions">
         <button id="btn-continue" class="btn primary" disabled>继续上次修行</button>
-        <button id="btn-new-game" class="btn">开创新宗门</button>
-        <button id="btn-start-load" class="btn">读取存档</button>
+        <button id="btn-new-game" class="btn" disabled>开创新宗门</button>
+        <button id="btn-start-load" class="btn" disabled>读取存档</button>
       </div>
       <form id="new-game-form" class="new-game-form hidden">
         <label>初代宗主姓名<input id="leader-name" name="leaderName" value="顾长风" maxlength="20" required autocomplete="off"></label>

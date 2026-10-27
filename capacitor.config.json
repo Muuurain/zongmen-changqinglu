@@ -1,0 +1,8 @@
+{
+  "appId": "com.zongmen.changqinglu",
+  "appName": "宗门长青录",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

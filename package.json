@@ -1,25 +1,33 @@
 {
   "name": "zongmen-changqinglu",
   "productName": "宗门长青录",
-  "version": "1.2.2",
-  "description": "传统仙侠宗门经营模拟游戏（v1.2.2 弟子生命周期与开始界面版）",
+  "version": "1.2.3",
+  "description": "传统仙侠宗门经营模拟游戏（v1.2.3 Android APK 适配版）",
   "license": "MIT",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test scripts/game.test.js",
+    "build:web": "node scripts/build-android-web.js",
+    "android:sync": "npm run build:web && cap sync android",
+    "android:apk": "node scripts/build-android-apk.js debug",
+    "android:release-apk": "node scripts/build-android-apk.js release",
+    "android:install": "node scripts/build-android-apk.js install",
+    "android:open": "cap open android",
     "pack": "electron-builder --win --x64",
     "dist": "electron-builder --win nsis --x64",
     "build:portable": "node scripts/build-portable.js"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^25.0.0",
+    "esbuild": "^0.25.12"
   },
-    "build": {
-      "appId": "com.zongmen.changqinglu",
-      "productName": "宗门长青录",
-      "icon": "build/app_icon.png",
+  "build": {
+    "appId": "com.zongmen.changqinglu",
+    "productName": "宗门长青录",
+    "icon": "build/app_icon.png",
     "directories": {
       "output": "dist"
     },
@@ -35,11 +43,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -48,5 +60,11 @@
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "宗门长青录"
     }
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.5"
   }
 }

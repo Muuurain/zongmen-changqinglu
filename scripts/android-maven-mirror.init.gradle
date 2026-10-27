@@ -1,0 +1,22 @@
+// Optional fallback for networks that interrupt Gradle TLS sessions to AndroidX artifacts.
+// Enable with ANDROID_GRADLE_INIT_SCRIPT=scripts/android-maven-mirror.init.gradle.
+gradle.beforeProject { project ->
+    def replaceGoogleRepository = { repository ->
+        if (repository.hasProperty('url') && repository.url.toString().contains('dl.google.com/dl/android/maven2')) {
+            repository.url = uri('https://maven.aliyun.com/repository/google/')
+        }
+    }
+    project.repositories.each(replaceGoogleRepository)
+    project.repositories.whenObjectAdded(replaceGoogleRepository)
+    project.buildscript.repositories.each(replaceGoogleRepository)
+    project.buildscript.repositories.whenObjectAdded(replaceGoogleRepository)
+
+    project.buildscript.repositories.maven { repo ->
+        repo.name = 'MavenCentralGoogleMirror'
+        repo.url = uri('https://maven-central.storage-download.googleapis.com/maven2/')
+    }
+    project.repositories.maven { repo ->
+        repo.name = 'MavenCentralGoogleMirror'
+        repo.url = uri('https://maven-central.storage-download.googleapis.com/maven2/')
+    }
+}

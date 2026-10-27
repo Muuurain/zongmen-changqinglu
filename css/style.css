@@ -21,7 +21,7 @@ body {
   font-size: 0.875rem;
   overflow: hidden;
 }
-#app { display: flex; flex-direction: column; height: 100vh; }
+#app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
 /* 顶栏 */
 #topbar {
@@ -469,6 +469,98 @@ tr:hover td { background: rgba(255,255,255,.03); }
 @media (max-width: 35rem) {
   .start-panel { padding: 1rem; }
   .start-panel h1 { font-size: 1.4rem; }
+}
+
+/* Android / narrow viewport layout: preserve the game hierarchy while keeping navigation touchable. */
+@media (max-width: 60rem) {
+  html, body { width: 100%; height: 100%; }
+  body { overscroll-behavior: none; }
+  #topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .375rem .5rem;
+    padding: calc(.375rem + env(safe-area-inset-top, 0px)) .625rem .375rem;
+  }
+  .sect-info { min-width: 0; display: flex; flex-wrap: wrap; gap: .25rem .5rem; align-items: baseline; }
+  .sect-name { font-size: 1rem; letter-spacing: .08rem; }
+  .sect-date, .sect-rep { font-size: .75rem; }
+  .resource-bar {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    padding: .2rem 0;
+  }
+  .res-item { flex: 0 0 auto; }
+  .top-actions { grid-column: 1 / -1; display: flex; flex-wrap: nowrap; overflow-x: auto; gap: .375rem; }
+  .top-actions .btn { min-height: 2.625rem; flex: 0 0 auto; white-space: nowrap; }
+  #main { flex-direction: column; min-height: 0; overflow: hidden; }
+  #content { order: 0; width: 100%; min-height: 0; padding: .625rem; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+  #sidenav {
+    order: 1;
+    width: 100%;
+    flex: 0 0 auto;
+    min-height: 3.5rem;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    padding: .125rem 0 calc(.125rem + env(safe-area-inset-bottom, 0px));
+    border-right: 0;
+    border-top: .0625rem solid var(--border);
+    scrollbar-width: thin;
+  }
+  .nav-btn {
+    flex: 0 0 auto;
+    min-width: 4.75rem;
+    min-height: 3.125rem;
+    padding: .5rem .625rem;
+    text-align: center;
+    font-size: .8125rem;
+    border-left: 0;
+    border-bottom: .1875rem solid transparent;
+    white-space: nowrap;
+  }
+  .nav-btn.active { border-bottom-color: var(--gold); }
+  .grid.cols-2, .grid.cols-3 { grid-template-columns: minmax(0, 1fr); }
+  .stat-row { gap: .5rem; }
+  .stat-box { min-width: calc(50% - .25rem); padding: .5rem .375rem; }
+  .stat-box .num { font-size: 1.125rem; }
+  .table-scroll { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-scroll table { min-width: 62rem; }
+  .modal-mask {
+    align-items: center;
+    padding: max(.5rem, env(safe-area-inset-top, 0px)) max(.5rem, env(safe-area-inset-right, 0px))
+      max(.5rem, env(safe-area-inset-bottom, 0px)) max(.5rem, env(safe-area-inset-left, 0px));
+  }
+  .modal {
+    width: 100%;
+    max-width: 42rem;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 1rem);
+    padding: .875rem;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal .modal-footer { flex-wrap: wrap; }
+  .modal .modal-footer .btn { min-height: 2.75rem; }
+  .modal .opt-btn { min-height: 2.75rem; }
+  .start-panel { max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 2rem); overflow-y: auto; }
+  button, select, input { touch-action: manipulation; }
+  .btn { min-height: 2.75rem; }
+  .btn.small { min-height: 2.625rem; }
+}
+
+@media (max-height: 32rem) and (orientation: landscape) {
+  #topbar { grid-template-columns: minmax(0, 1fr) auto; padding: calc(.25rem + env(safe-area-inset-top, 0px)) .5rem .25rem; gap: .25rem .5rem; }
+  .resource-bar { grid-column: 1 / 2; grid-row: 2; }
+  .top-actions { grid-column: 2; grid-row: 1 / 3; max-width: 42vw; }
+  #sidenav { min-height: 2.875rem; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .nav-btn { min-height: 2.625rem; padding: .25rem .5rem; }
+  .panel { padding: .625rem; margin-bottom: .5rem; }
+  .dujie-effect { height: 10rem; }
 }
 .dujie-effect { height: 20rem; display: flex; align-items: center; justify-content: center; overflow: hidden; margin: 0.25rem 0; }
 .dujie-effect .sprite-dujie-bolt { width: 10rem; height: 20rem; margin: 0; transform: none; background-size: 40rem 80rem; animation: play-dujie-v121 0.8s steps(1, end) 1 forwards; }

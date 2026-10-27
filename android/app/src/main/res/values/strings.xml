@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">宗门长青录</string>
+    <string name="title_activity_main">宗门长青录</string>
+    <string name="package_name">com.zongmen.changqinglu</string>
+    <string name="custom_url_scheme">com.zongmen.changqinglu</string>
+</resources>

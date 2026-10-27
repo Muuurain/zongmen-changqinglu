@@ -4,8 +4,18 @@ node_modules/
 # 构建产物
 dist/
 dist-portable/
+release-android/
 out/
 release/
+artifacts/android-build/
+android/local.properties
+android/keystore.properties
+android/keystore/
+android/*.jks
+android/*.keystore
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+www/
 
 # 日志
 *.log

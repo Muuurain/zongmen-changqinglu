@@ -1149,13 +1149,19 @@ const Game = {
   save(slot) {
     try {
       this.state.saveVersion = 3;
-      localStorage.setItem(this.saveKey(slot), JSON.stringify(this.state));
+      const key = this.saveKey(slot);
+      const value = JSON.stringify(this.state);
+      const bridge = window.AndroidAppBridge;
+      if (bridge && bridge.isAndroid && !bridge.setItem(key, value)) return false;
+      try { localStorage.setItem(key, value); } catch (storageError) { if (!bridge || !bridge.isAndroid) throw storageError; }
       return true;
     } catch (e) { return false; }
   },
   load(slot) {
     try {
-      const raw = localStorage.getItem(this.saveKey(slot));
+      const key = this.saveKey(slot);
+      const bridge = window.AndroidAppBridge;
+      const raw = bridge && bridge.isAndroid ? bridge.getItem(key) : localStorage.getItem(key);
       if (!raw) return false;
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.disciples) || !Array.isArray(parsed.sects) ||
@@ -1247,7 +1253,9 @@ const Game = {
   },
   saveInfo(slot) {
     try {
-      const raw = localStorage.getItem(this.saveKey(slot));
+      const key = this.saveKey(slot);
+      const bridge = window.AndroidAppBridge;
+      const raw = bridge && bridge.isAndroid ? bridge.getItem(key) : localStorage.getItem(key);
       if (!raw) return null;
       const s = JSON.parse(raw);
       if (!s || !Array.isArray(s.disciples)) return null;

@@ -8,6 +8,10 @@ const UI = {
   init() {
     // v1.1.1：DPI 自适应——依据窗口尺寸设定根字号，CSS 全部使用 rem，元素随分辨率等比缩放
     const fitUI = () => {
+      if (window.innerWidth <= 960) {
+        document.documentElement.style.fontSize = "16px";
+        return;
+      }
       const scale = Math.min(window.innerWidth / 1360, window.innerHeight / 800);
       document.documentElement.style.fontSize = (16 * Math.min(Math.max(scale, 0.8), 2.0)) + "px";
     };
@@ -43,7 +47,7 @@ const UI = {
     const bgmBtn = document.getElementById("btn-bgm");
     bgm.volume = 0.35;
     bgmBtn.onclick = () => {
-      if (bgm.paused) { bgm.play(); bgmBtn.textContent = "♪"; }
+      if (bgm.paused) { bgm.play().then(() => { bgmBtn.textContent = "♪"; }).catch(() => { bgmBtn.textContent = "♪̶"; }); }
       else { bgm.pause(); bgmBtn.textContent = "♪̶"; }
     };
     // 首次交互自动播放（规避浏览器自动播放限制）
@@ -53,7 +57,60 @@ const UI = {
     document.addEventListener("click", e => {
       if (e.target.closest(".btn") && !e.target.closest(".btn:disabled")) this.sfx("click");
     });
+    window.addEventListener("zongmen-native-back", () => this.handleBackButton());
+    window.addEventListener("zongmen-native-app-state", event => this.handleAppStateChange(event.detail?.isActive));
+    document.addEventListener("visibilitychange", () => this.handleAppStateChange(document.visibilityState === "visible"));
+    document.getElementById("app").dataset.ready = "true";
+    document.getElementById("btn-new-game").disabled = false;
+    document.getElementById("btn-start-load").disabled = false;
     this.refreshStartMenu();
+  },
+  handleAppStateChange(isActive) {
+    if (typeof isActive !== "boolean" || this._appActive === isActive) return;
+    this._appActive = isActive;
+    const bgm = document.getElementById("bgm");
+    const bgmBtn = document.getElementById("btn-bgm");
+    if (!isActive) {
+      this._resumeBgmAfterBackground = !!bgm && !bgm.paused;
+      if (bgm) bgm.pause();
+      if (Game.state) Game.save(0);
+      const bridge = window.AndroidAppBridge;
+      if (bridge?.isAndroid) bridge.flush().catch(error => console.error("Android background save flush failed:", error));
+      return;
+    }
+    if (this._resumeBgmAfterBackground && bgm) {
+      this._resumeBgmAfterBackground = false;
+      bgm.play().then(() => { bgmBtn.textContent = "♪"; }).catch(() => { bgmBtn.textContent = "♪̶"; });
+    }
+  },
+  handleBackButton() {
+    const start = document.getElementById("start-screen");
+    const game = document.getElementById("game-screen");
+    const form = document.getElementById("new-game-form");
+    const modalMask = document.getElementById("modal-mask");
+    if (modalMask && !modalMask.classList.contains("hidden")) {
+      if (this._confirmCb) {
+        this._confirmCb = null;
+        this.closeModal();
+        return;
+      }
+      const pending = this._pendingWorld || this._pendingAdv || this._pendingEvent ||
+        Game.state?.disciples?.some(d => d.tribulation);
+      if (pending) return this.confirm("暂时返回开始界面？未处理事件会保存在自动存档中，继续修行时可接着处理。", () => this.showStartScreen());
+      this.closeModal();
+      return;
+    }
+    if (start && !start.classList.contains("hidden")) {
+      if (form && !form.classList.contains("hidden")) return this.cancelNewGame();
+      return this.confirm("确定退出宗门长青录？", () => window.AndroidAppBridge?.exit().catch(() => this.toast("存档仍未写入完成，请重试退出")));
+    }
+    if (game && !game.classList.contains("hidden") && this.currentView !== "overview") {
+      return this.switchView("overview");
+    }
+    if (Game.state && this.currentView === "overview") {
+      return this.confirm("返回开始界面并保存当前进度？", () => this.showStartScreen());
+    }
+    return this.confirm("确定退出宗门长青录？", () => window.AndroidAppBridge?.exit().catch(() => this.toast("存档仍未写入完成，请重试退出")));
   },
   refreshStartMenu() {
     const save = Game.saveInfo(0);
@@ -73,6 +130,9 @@ const UI = {
     document.getElementById("start-screen").classList.remove("hidden");
     document.getElementById("start-actions").classList.remove("hidden");
     document.getElementById("new-game-form").classList.add("hidden");
+    if (saved && window.AndroidAppBridge?.isAndroid) {
+      window.AndroidAppBridge.flush().catch(() => this.toast("自动存档写入失败，请稍后重试或检查设备剩余空间"));
+    }
     if (!saved) this.toast("当前进度保留在本次运行中，但自动存档失败；请继续游戏后手动存档");
   },
   continueGame() {
@@ -1204,8 +1264,10 @@ const UI = {
       <div class="modal-options">${slots}${mode === "save" ? `<button class="btn opt-btn" onclick="UI.doLoad(0)">读取自动存档（档位0）</button>` : `<button class="btn opt-btn" onclick="UI.doLoad(0)">读取自动存档（档位0）</button>`}${reset}</div>
       <div class="modal-footer"><button class="btn" onclick="UI.closeModal()">取消</button></div>`);
   },
-  doSave(slot) {
+  async doSave(slot) {
     if (!Game.save(slot)) return this.toast("存档失败，请检查本地存储空间或权限");
+    try { await window.AndroidAppBridge?.flush(); }
+    catch (error) { console.error("Android save flush failed:", error); return this.toast("本地存档写入失败，请检查设备剩余空间后重试"); }
     this.closeModal();
     this.toast(`已保存至档位 ${slot}`);
   },
@@ -1233,6 +1295,7 @@ const UI = {
     const m = document.getElementById("modal");
     m.classList.remove("war-result", "event-mijing", "event-alliance", "event-spirit", "event-dujie");
     document.getElementById("modal-mask").classList.add("hidden");
+    this._confirmCb = null;
     // 战争/渡劫 BGM 复位
     const bgm = document.getElementById("bgm");
     if (bgm && (bgm.dataset.warMode || bgm.dataset.dujieMode)) {
@@ -1273,4 +1336,7 @@ const UI = {
   }
 };
 
-window.addEventListener("DOMContentLoaded", () => UI.init());
+window.addEventListener("DOMContentLoaded", async () => {
+  try { await window.AndroidAppBridge?.ready; } catch (error) { console.warn("Android save migration failed:", error); }
+  UI.init();
+});
