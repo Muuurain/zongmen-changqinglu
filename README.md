@@ -2,9 +2,16 @@
 
 > 传统古典仙侠背景的宗门经营模拟游戏。融合「弟子深度养成 + 宗门道统传承」的内部经营线，与「外交贸易 + 征伐收服」的外部博弈线，形成内外双循环闭环。**非挂机设计**——一切成长由玩家决策驱动。
 
-![平台](https://img.shields.io/badge/平台-Windows%20%7C%20浏览器-blue) ![引擎](https://img.shields.io/badge/引擎-Electron%2033%20%7C%20原生JS-orange) ![版本](https://img.shields.io/badge/版本-v1.2.2-green)
+![平台](https://img.shields.io/badge/平台-Windows%20%7C%20Android%20%7C%20浏览器-blue) ![引擎](https://img.shields.io/badge/引擎-Electron%2033%20%7C%20Capacitor%208%20%7C%20原生JS-orange) ![版本](https://img.shields.io/badge/版本-v1.2.3-green)
 
-## 当前版本：v1.2.2「弟子生命周期与开始界面」（2026-10-26）
+## 当前版本：v1.2.3「Android APK 适配」（2026-10-26）
+
+- **Android 版上线**：Capacitor 外壳与 Windows 版同源同版本（应用 ID `com.zongmen.changqinglu`，Android 7.0+）；手机窄屏/横屏布局、触控尺寸、安全区适配；系统返回键逐级处理；切后台自动保存并暂停音乐。
+- **原生存档桥接**：四槽位写入应用私有目录，首次启动自动迁移旧 localStorage 存档；退出前等待存档写入完成。
+- **构建链**：`npm run android:apk`（debug）/ `android:release-apk`（签名 release），APK 输出至 `release-android/`；打包、签名与验收详见 [docs/Android_APK_打包发布指南.md](docs/Android_APK_打包发布指南.md)。
+- **验证**：117 项逻辑回归通过；apksigner v2 签名验证与包信息核对通过。Release v1.2.3 已发布，含 Windows 安装程序与 Android APK 双资产。交接见 [docs/v1.2.3_Android_APK_适配与交接.md](docs/v1.2.3_Android_APK_适配与交接.md)。
+
+### v1.2.2「弟子生命周期与开始界面」（2026-10-26）
 
 - **开始界面**：启动进入开始页（继续上次修行 / 开创新宗门 / 读取存档），可自定义初代宗主姓名、性别与宗门名；顶栏新增主菜单，返回菜单自动保存，「继续本次修行」直接恢复内存进度。
 - **人物生平留档**：弟子不再从名册删除，统一保留 biography 时间线、离宗原因与年月、离宗前战力快照；弟子页新增「人物留档」区，陨落/逐出/离宗/飞升人物均可查看只读生平。
@@ -66,12 +73,15 @@
 
 ## 运行方式
 
-### 方式一：下载 exe 安装程序（推荐）
-从 [Releases](../../releases) 下载最新版 `ZongMenChangQingLu-Setup-x.x.x.exe`（NSIS 安装程序），运行后按向导安装即可。当前最新为 [v1.2.2](../../releases/tag/v1.2.2)。Release 资产仅提供 exe 安装程序，不提供 zip 压缩包。
+### 方式一：下载 exe 安装程序（Windows，推荐）
+从 [Releases](../../releases) 下载最新版 `ZongMenChangQingLu-Setup-x.x.x.exe`（NSIS 安装程序），运行后按向导安装即可。当前最新为 [v1.2.3](../../releases/tag/v1.2.3)。
+
+### 方式二：下载 APK（Android）
+从 [Releases](../../releases) 下载 `ZongMenChangQingLu-v1.2.3-android-release.apk`（Android 7.0+），复制到手机并允许「安装未知应用」。首次打开自动迁移旧存档；卸载或清除数据会删除本地存档。
 
 也可直接打开本项目 `index.html` 游玩，或启动已重建的便携版 `dist-portable/宗门长青录-win32-x64/宗门长青录.exe`。
 
-### 方式二：本地构建便携版
+### 方式三：本地构建便携版
 便携版 zip（`宗门长青录-win32-x64.zip`，解压后双击 `宗门长青录.exe`）不由 Release 分发，需本地自行构建：
 
 ```bash
@@ -80,10 +90,10 @@ npm run build:portable
 
 产物位于 `dist-portable/`，无需管理员权限。
 
-### 方式三：浏览器直接游玩
+### 方式四：浏览器直接游玩
 双击打开 `index.html` 即可（存档保存在浏览器 localStorage）。
 
-### 方式四：从源码运行
+### 方式五：从源码运行
 ```bash
 npm install
 npm start
@@ -97,6 +107,9 @@ npm run build:portable
 
 # NSIS 安装程序（若报符号链接权限错误，改用管理员终端运行），产物在 dist/宗门长青录 Setup x.x.x.exe
 npm run dist
+
+# Android APK（需 JDK 21 + Android SDK，详见 docs/Android_APK_打包发布指南.md），产物在 release-android/
+npm run android:release-apk
 ```
 
 ## 回归验证
@@ -110,17 +123,18 @@ npm test
 ## 项目结构
 
 ```
-├── index.html          # 入口页面
+├── index.html          # 入口页面（含开始页骨架与移动 viewport）
 ├── main.js             # Electron 主进程
-├── css/style.css       # 国风水墨 UI（v1.1.0 帧动画；v1.1.1 起全部 rem 化支持 DPI 自适应）
+├── capacitor.config.json + android/   # Capacitor Android 原生工程（v1.2.3 起）
+├── css/style.css       # 国风水墨 UI（v1.1.0 帧动画；v1.1.1 起 rem 化；v1.2.3 起移动窄屏适配）
 ├── js/
-│   ├── data.js         # 配置表（境界/建筑/事件/势力，数据驱动可扩展）
-│   ├── game.js         # 核心逻辑（月度结算/自动突破/灵根招募/战争等；存档结构版本 3）
-│   └── ui.js           # 界面渲染与交互（含资源映射、动效接入与 fitUI 自适应）
-├── assets/             # 美术与音频资源（AI 生成，v1.1.0 起按 avatar/portrait/ill/anim/icon/ui/audio 分目录）
-├── build/app_icon.png  # 应用图标（便携版与 NSIS 安装包共用）
-├── docs/               # PRD / architecture / progress / 资源清单 / Markdown 版本交接记录
-└── scripts/            # 打包（build-portable.js）、107 项回归测试（game.test.js）、Edge 界面冒烟（ui-smoke.js）
+│   ├── data.js         # 配置表（境界/灵根/建筑/事件/势力，数据驱动可扩展）
+│   ├── game.js         # 核心逻辑（月度结算/自动突破/灵根招募/战争/生命周期等；存档结构版本 3）
+│   └── ui.js           # 界面渲染与交互（含资源映射、动效接入、fitUI 自适应与 Android 桥接）
+├── assets/             # 美术与音频资源（AI 生成，按 avatar/portrait/ill/anim/icon/ui/audio 分目录）
+├── build/app_icon.png  # 应用图标（Windows 与 Android 共用）
+├── docs/               # PRD / architecture / progress / 打包发布指南 / Markdown 版本交接记录
+└── scripts/            # 打包（build-portable、build-android-*）、117 项回归测试（game.test.js）、Edge 界面冒烟（ui-smoke.js）
 ```
 
 ## 设计原则
@@ -132,7 +146,7 @@ npm test
 
 ## 技术栈
 
-纯前端原生 HTML/CSS/JavaScript（配置表驱动），Electron 封装 Windows 桌面端，electron-builder / 自研脚本双打包通道。
+纯前端原生 HTML/CSS/JavaScript（配置表驱动），Electron 33 封装 Windows 桌面端，Capacitor 8 封装 Android 端，electron-builder / 自研脚本双打包通道，Android 构建链见打包发布指南。
 
 ## License
 

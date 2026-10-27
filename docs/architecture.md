@@ -2,24 +2,28 @@
 
 ## 1. 整体架构
 
-纯前端单页应用（SPA）+ Electron 桌面壳，**无后端、无网络依赖**。采用「配置表 + 纯逻辑引擎 + 渲染层」三层分离：
+纯前端单页应用（SPA）+ Electron 桌面壳 + Capacitor Android 壳，**无后端、无网络依赖**。采用「配置表 + 纯逻辑引擎 + 渲染层」三层分离：
 
 ```
 ┌─────────────────────────────────────────────┐
-│  index.html  (入口 + 页面骨架 + 弹窗容器)      │
+│  index.html  (入口 + 开始页骨架 + 页面容器)      │
 ├──────────────┬──────────────┬───────────────┤
 │   ui.js      │   game.js    │   data.js      │
 │  渲染/交互层  │  核心逻辑引擎  │  配置表(数据层) │
 ├──────────────┴──────────────┴───────────────┤
-│  css/style.css（国风水墨样式 + 资源引用）       │
+│  css/style.css（国风水墨样式 + 移动窄屏适配）    │
 │  assets/（按目录组织美术/音频资源，运行时静态加载） │
 ├─────────────────────────────────────────────┤
-│  main.js（Electron 主进程，仅开窗加载页面）     │
+│  main.js（Electron 主进程，仅开窗加载页面）      │
+│  android/（Capacitor 原生工程 + scripts/        │
+│   build-android-*.js 构建链 + android-native.js  │
+│   存档桥接/返回键/前后台事件）                   │
 └─────────────────────────────────────────────┘
 ```
 
 - **浏览器形态**：直接打开 `index.html` 即玩，存档存 localStorage
 - **桌面形态**：Electron 加载同一份页面，`main.js` 仅负责创建窗口
+- **Android 形态**：Capacitor WebView 加载经 esbuild 打包的同一页面（`www/`）；`scripts/android-native.js` 用 Filesystem 插件将存档写入应用私有目录，首次启动迁移旧 localStorage，并把生命周期/返回键转为页面事件
 
 ## 2. 模块划分与职责
 
@@ -40,8 +44,9 @@
 |---|---|---|
 | 语言 | 原生 HTML/CSS/JavaScript（ES6+） | 零构建、零依赖即可运行，便于快速迭代与直接预览 |
 | 桌面封装 | Electron 33 | 将网页打包为跨平台 exe，业界成熟方案 |
-| 打包 | electron-builder（NSIS 安装包）+ 自研便携脚本 | 双通道：安装包需管理员权限，便携脚本零门槛 |
-| 存档 | localStorage（JSON 序列化 `Game.state`） | 纯前端无后端的最简持久化 |
+| 移动封装 | Capacitor 8（App 8.1.2 / Filesystem 8.1.5） | 复用全部网页源码出 Android APK，原生能力通过插件桥接 |
+| 打包 | electron-builder（NSIS）+ 自研便携脚本 + Gradle（APK v2 签名） | 三通道：安装包需管理员权限，便携脚本零门槛，APK 需 JDK 21 + SDK API 36 |
+| 存档 | localStorage（浏览器/桌面 JSON 序列化）；Android 应用私有文件 + localStorage 内存镜像 | 纯前端无后端的最简持久化；Android 首次启动自动迁移旧档 |
 | 资源 | AI 生成 PNG/MP3，静态引用 | 美术/音乐解耦，可随时替换 |
 
 ## 4. 数据流
@@ -125,19 +130,22 @@ UI._drainQueue() 依次弹出事件弹窗，玩家逐个抉择（Game.applyEvent
 
 ```
 D:\Code\宗门长青录\
-├── index.html / main.js / package.json
+├── index.html / main.js / package.json / capacitor.config.json
 ├── css\style.css
 ├── js\{data,game,ui}.js
 ├── assets\{anim,avatar,icon,ill,portrait,ui,audio}\ # 按用途分类的资源
 ├── assets_v1.2.0_pending\    # 动画原帧复核材料（不进入安装包）
-├── docs\                     # PRD / architecture / progress / 各版本交接文档
-├── scripts\{build-portable.js,game.test.js,ui-smoke.js}
-├── build\app_icon.png        # 应用图标
+├── android\                  # Capacitor 原生工程（构建产物与密钥已 gitignore）
+├── docs\                     # PRD / architecture / progress / 打包发布指南 / 各版本交接文档
+├── scripts\{build-portable.js,build-android-web.js,build-android-apk.js,android-native.js,game.test.js,ui-smoke.js}
+├── build\app_icon.png        # 应用图标（Windows 与 Android 共用）
 ├── dist\                     # electron-builder 产物（NSIS 安装包 + blockmap）
-└── dist-portable\            # 便携版产物（宗门长青录.exe + zip）
+├── dist-portable\            # 便携版产物（宗门长青录.exe + zip）
+├── release-android\          # Android APK 产物（gitignore，仅本机）
+└── www\                      # Android WebView 网页构建产物（gitignore）
 ```
 
-**发布**：GitHub 仓库 `Muuurain/zongmen-changqinglu`，Release 仅分发 NSIS 安装程序 `ZongMenChangQingLu-Setup-x.x.x.exe`（当前最新 v1.2.2）；便携版 zip 由 `npm run build:portable` 本地生成，不上传 Release。
+**发布**：GitHub 仓库 `Muuurain/zongmen-changqinglu`，Release 自 v1.2.3 起固定双平台资产：`ZongMenChangQingLu-Setup-x.x.x.exe`（Windows NSIS 安装程序）+ `ZongMenChangQingLu-vX.X.X-android-release.apk`（Android 签名包）；便携版 zip 由 `npm run build:portable` 本地生成，不上传 Release。
 
 ## 8. v1.2.0 兼容说明
 
@@ -150,3 +158,7 @@ D:\Code\宗门长青录\
 ## 10. v1.2.2 开始界面与弟子生命周期
 
 启动流程改为开始页优先（`#start-screen`）：继续上次修行 / 开创新宗门（自定义初代宗主姓名、性别、宗门名）/ 读取存档；`Game.newGame(options)` 参数化开局并做输入校验，顶栏新增主菜单（返回自动保存，继续本次修行直接恢复内存进度）。人物不再从名册删除，统一走 `removeDisciple` 保留生平（`biography` 时间线）、离宗原因与年月、离宗战力快照；状态机为 `active/deceased/expelled/departed/ascended/unknown`，旧档按 `alive` 与飞升标记确定性补迁移。强敌战损陨落由 `resolveCombatCasualty` 判定（`COMBAT_FATALITY_CHANCE = 0.05` 条件概率），逐出山门由 `expelDisciple` 执行并统一清理岗位/长老/分宗/护送/护法引用。详见 [v1.2.2 交接文档](弟子生命周期与开始界面_代码交接_2026-10-26.md)。
+
+## 11. v1.2.3 Android APK 适配
+
+在「配置表 + 纯逻辑引擎 + 渲染层」之外新增第四条构建链：网页源码经 `scripts/build-android-web.js`（esbuild 打包 `android-native.js` 桥接注入页面）输出 `www/`，`cap sync android` 同步到原生工程，Gradle 构建签名 APK 复制至 `release-android/`。原生侧（Capacitor App/Filesystem 插件）：四存档槽写入应用私有目录并保留 localStorage 内存镜像，首次启动迁移旧档；生命周期与返回键转为页面事件，后台自动保存并暂停音乐。移动渲染侧：`index.html` 增加移动 viewport/safe-area，`css/style.css` 窄屏断点（顶部信息栏、横向滚动导航、单列卡片、可滚动弹窗、触控尺寸）。发布签名密钥在仓库外（`android/keystore.properties` 本机忽略文件），APK 用 v2 方案签名。详见 [v1.2.3 交接文档](v1.2.3_Android_APK_适配与交接.md) 与 [Android_APK_打包发布指南](Android_APK_打包发布指南.md)。

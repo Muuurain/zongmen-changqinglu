@@ -1,6 +1,16 @@
 # 《宗门长青录》项目进度
 
-> 更新日期：2026-10-26 ｜ 当前版本：v1.2.2（弟子生命周期与开始界面，已发布 Release）
+> 更新日期：2026-10-27 ｜ 当前版本：v1.2.3（Android APK 适配，已发布 Release，双平台资产）
+
+## v1.2.3 更新记录
+
+- 新增 Capacitor Android 外壳：应用 ID `com.zongmen.changqinglu`，versionCode 10203，min API 24 / target API 36，Build Tools 36.0.0 固定，支持中文路径构建。
+- 手机端适配：移动 viewport 与安全区、窄屏单列/横滚导航/可滚动弹窗、触控尺寸、横屏压缩布局；系统返回键按弹窗/页面/菜单逐级处理；切后台自动保存并暂停音乐、回前台恢复。
+- 原生存档桥接：四槽位写入应用私有目录，首次启动迁移旧 localStorage 存档，退出前等待磁盘 flush。
+- 构建链：`build:web`（esbuild 打包桥接注入）、`android:apk` / `android:release-apk` / `android:install`，APK 输出 `release-android/`；发布签名 keystore 在仓库外，密钥不入库；`release-android/` 已加入 .gitignore。
+- 接手核查：117/117 测试复跑通过；APK 构建时间链核验（源码 21:56 → www 21:56:56 → 同步 21:56:58 → APK 21:57，含最新代码）；apksigner v2 验证通过、证书 SHA-256 与交接文档一致；aapt 核对包名/版本 1.2.3(10203)/API 24/36 一致；git 提交无密钥文件；.gitignore 补 `release-android/`；NSIS 1.2.3 asar 核验版本正确。
+- 发布：Release v1.2.3 双资产（`ZongMenChangQingLu-Setup-1.2.3.exe` + `ZongMenChangQingLu-v1.2.3-android-release.apk`，ASCII 命名）；自本版起 Release 固定双平台资产。交接与打包指南见 `v1.2.3_Android_APK_适配与交接.md` / `Android_APK_打包发布指南.md`。
+- 遗留：本次无连接设备/模拟器，真机验收（存档往返、返回键、前后台音乐）待按指南清单补测记录。
 
 ## v1.2.2 更新记录
 
@@ -141,5 +151,6 @@
 | v1.1.1 | 2026-10-25 | 修复：DPI 自适应缩放（px→rem + 根字号动态计算）、弹窗印章遮挡文字（印章移出弹窗固定为主界面 HUD） |
 | v1.1.2 | 2026-10-25 | 修复：弟子修炼、突破交互、战争次数、经济结算、事件与雷劫续接、存档迁移（F01–F26）；92 项回归通过；Release 已发布 |
 | v1.2.0 | 2026-10-26 | 自动突破与个人开关、三种用药策略、灵根重构、实力声望影响招募、存档结构 3；107 项回归通过；Release 已发布 |
+| v1.2.3 | 2026-10-26 | Android APK 适配（Capacitor 外壳、窄屏/触控/返回键、原生存档桥接、APK 构建签名链）；117 项回归通过；Release 双资产已发布（exe + APK） |
 | v1.2.2 | 2026-10-26 | 开始界面与自定义初代宗主、人物生平留档、强敌战损陨落 5%、逐出山门；117 项回归通过；Release 已发布 |
 | v1.2.1 | 2026-10-26 | 动画图集与静态美术接入、头像兼容、界面动画修复；107 项回归通过；Release 已发布 |
